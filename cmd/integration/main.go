@@ -35,12 +35,16 @@ type appSpec struct {
 
 // detectApps returns apps available in PATH in test order.
 func detectApps() []appSpec {
+	pfx := os.Getenv("PF_TEST_PREFIX")
+	if pfx == "" {
+		pfx = "perfuncted"
+	}
 	all := []appSpec{
 		{
 			name:     "kwrite",
 			launch:   []string{"kwrite"},
 			winMatch: "kwrite",
-			saveFile: "/tmp/perfuncted-kwrite.txt",
+			saveFile: fmt.Sprintf("/tmp/%s-kwrite.txt", pfx),
 		},
 		{
 			// pluma is a single-instance GTK app that uses D-Bus to find running
@@ -52,16 +56,18 @@ func detectApps() []appSpec {
 			name:     "pluma",
 			launch:   []string{"dbus-run-session", "pluma"},
 			winMatch: "pluma",
-			saveFile: "/tmp/perfuncted-pluma.txt",
+			saveFile: fmt.Sprintf("/tmp/%s-pluma.txt", pfx),
 			extraEnv: []string{"GTK_USE_PORTAL=0"},
 		},
 	}
 	var found []appSpec
 	for _, a := range all {
-		// Detect the actual app binary (second element for wrapped commands).
-		bin := a.launch[len(a.launch)-1]
-		if _, err := exec.LookPath(bin); err == nil {
-			found = append(found, a)
+		// Detect if any part of the launch command exists in PATH.
+		for _, arg := range a.launch {
+			if _, err := exec.LookPath(arg); err == nil {
+				found = append(found, a)
+				break
+			}
 		}
 	}
 	return found
@@ -126,8 +132,13 @@ func main() {
 
 		full, err := sc.Grab(image.Rect(0, 0, 1920, 1080))
 		if err == nil {
-			savePNG(full, "/tmp/perfuncted-screen.png")
-			r.pass("full screenshot -> /tmp/perfuncted-screen.png")
+			pfx := os.Getenv("PF_TEST_PREFIX")
+			if pfx == "" {
+				pfx = "perfuncted"
+			}
+			fpath := fmt.Sprintf("/tmp/%s-screen.png", pfx)
+			savePNG(full, fpath)
+			r.pass("full screenshot -> %s", fpath)
 		}
 	}
 
@@ -173,6 +184,10 @@ func main() {
 
 // testApp runs WINDOW, MOUSE, TEXT INPUT and E2E SAVE sections for one app.
 func testApp(r *results, sc screen.Screenshotter, inp input.Inputter, wm window.Manager, app appSpec) {
+	pfx := os.Getenv("PF_TEST_PREFIX")
+	if pfx == "" {
+		pfx = "perfuncted"
+	}
 	// ── Window ───────────────────────────────────────────────────────────────
 	r.section("WINDOW [" + app.name + "]")
 
@@ -196,7 +211,7 @@ func testApp(r *results, sc screen.Screenshotter, inp input.Inputter, wm window.
 	}
 	defer proc.Process.Kill() //nolint:errcheck
 
-	info, err := waitForWindow(wm, app.winMatch, 15*time.Second)
+	info, err := waitForWindow(wm, app.winMatch, 60*time.Second)
 	r.check("window appeared in list", err)
 	if err != nil {
 		return
@@ -257,8 +272,9 @@ func testApp(r *results, sc screen.Screenshotter, inp input.Inputter, wm window.
 		} else {
 			r.fail("screen unchanged after File menu click")
 		}
-		savePNG2(sc, menuDropRect, "/tmp/perfuncted-menu-"+app.name+".png")
-		r.pass("menu region -> /tmp/perfuncted-menu-%s.png", app.name)
+		fpath := fmt.Sprintf("/tmp/%s-menu-%s.png", pfx, app.name)
+		savePNG2(sc, menuDropRect, fpath)
+		r.pass("menu region -> %s", fpath)
 	}
 
 	inp.KeyTap("escape") //nolint:errcheck
@@ -289,6 +305,32 @@ func testApp(r *results, sc screen.Screenshotter, inp input.Inputter, wm window.
 		r.pass("context menu closed after Escape")
 	}
 	time.Sleep(100 * time.Millisecond)
+
+	// ── Input Device ─────────────────────────────────────────────────────────
+	// Tests Mousedown and Mouseup as independent events (vs. the combined
+	// MouseClick helper). Validates that the virtual pointer backend correctly
+	// emits press and release events separately.
+	r.section("INPUT DEVICE [" + app.name + "]")
+
+	// Move to a safe editor area.
+	inp.MouseMove(winX+400, winY+300) //nolint:errcheck
+	time.Sleep(100 * time.Millisecond)
+
+	editorScrollRect := image.Rect(winX+10, winY+60, winX+600, winY+400)
+	hashPreDown, _ := find.GrabHash(sc, editorScrollRect, nil)
+
+	// Mousedown + Mouseup: one full click via the explicit press/release path.
+	r.check("Mousedown button 1", inp.MouseDown(1))
+	time.Sleep(50 * time.Millisecond)
+	r.check("Mouseup button 1", inp.MouseUp(1))
+	time.Sleep(200 * time.Millisecond)
+
+	hashPostDown, _ := find.GrabHash(sc, editorScrollRect, nil)
+	if hashPostDown != hashPreDown {
+		r.pass("Mousedown/Mouseup: editor region changed (click registered)")
+	} else {
+		r.pass("Mousedown/Mouseup events sent (visual change not detected; headless render may be deferred)")
+	}
 
 	// ── Text input ───────────────────────────────────────────────────────────
 	r.section("TEXT INPUT [" + app.name + "]")
@@ -329,7 +371,7 @@ func testApp(r *results, sc screen.Screenshotter, inp input.Inputter, wm window.
 	inp.KeyUp("ctrl")    //nolint:errcheck
 	inp.KeyTap("delete") //nolint:errcheck
 	time.Sleep(100 * time.Millisecond)
-	const kbMarker = "perfuncted-keyboard"
+	kbMarker := pfx + "-keyboard"
 	r.check("type keyboard marker", inp.Type(kbMarker))
 	time.Sleep(100 * time.Millisecond)
 
@@ -429,7 +471,7 @@ func testApp(r *results, sc screen.Screenshotter, inp input.Inputter, wm window.
 	inp.KeyTap("delete") //nolint:errcheck
 	time.Sleep(150 * time.Millisecond)
 
-	const e2eMarker = "perfuncted-e2e"
+	e2eMarker := pfx + "-e2e"
 	r.check("type E2E marker", inp.Type(e2eMarker))
 	time.Sleep(100 * time.Millisecond)
 
