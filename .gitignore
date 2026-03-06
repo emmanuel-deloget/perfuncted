@@ -8,6 +8,7 @@
 docs/
 *.md
 !README.md
+!docs-cli/*.md
 
 # IDEs
 .vscode/

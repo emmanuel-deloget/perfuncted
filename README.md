@@ -52,6 +52,8 @@ go get github.com/nskaggs/perfuncted
 
 ## CLI usage
 
+See docs/cli-reference.md for a complete CLI reference and examples.
+
 ```
 pf info                                    # show detected session and backend availability
 

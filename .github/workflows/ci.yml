@@ -36,6 +36,11 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
+      - name: Docs generation check
+        run: |
+          go run ./cmd/pf/ docs --dir ./docs-cli
+          git diff --exit-code docs-cli/
+
       - name: staticcheck
         uses: dominikh/staticcheck-action@v1
         with:

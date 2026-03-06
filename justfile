@@ -21,8 +21,13 @@ tidy:
     go mod tidy
     go mod verify
 
+# Generate CLI documentation
+docs:
+    rm -rf docs-cli/
+    go run ./cmd/pf/ docs --dir ./docs-cli
+
 # Full pre-commit workflow
-precommit: check tidy
+precommit: check tidy docs
 
 # Build all packages and binaries
 build: precommit
