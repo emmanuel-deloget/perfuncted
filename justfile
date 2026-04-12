@@ -50,7 +50,13 @@ install: build
 nested:
     #!/usr/bin/env bash
     set -e
+    HOST_XDG="$XDG_RUNTIME_DIR"
+    HOST_WL="$WAYLAND_DISPLAY"
     MY_XDG=$(mktemp -d -t perfuncted-xdg-XXXXXX)
+    
+    # Symlink the generic wayland-1 socket (which sway will create) into our isolated dir
+    ln -sf "$HOST_XDG/wayland-1" "$MY_XDG/wayland-1"
+    
     export XDG_RUNTIME_DIR=$MY_XDG
     export WAYLAND_DISPLAY=wayland-1
     echo "============================================="
@@ -63,10 +69,12 @@ nested:
     echo ""
     echo "When done, tear down with: just cleanup-nested"
     echo "============================================="
+    
+    # Run sway in the background but explicitly pass the HOST environment 
+    # so it can connect to the primary compositor.
     WLR_BACKENDS=wayland WLR_RENDERER=pixman \
-      sway --unsupported-gpu -c config/sway/nested.conf &
-
-# Run cmd/integration inside the nested sway session.
+    XDG_RUNTIME_DIR="$HOST_XDG" WAYLAND_DISPLAY="$HOST_WL" \
+    sway --unsupported-gpu -c config/sway/nested.conf &
 nested-example:
     WAYLAND_DISPLAY="${SWAY_WAYLAND_DISPLAY:-wayland-1}" go run ./cmd/integration/
 
