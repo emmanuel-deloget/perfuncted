@@ -176,3 +176,79 @@ func (b *X11Backend) Close() error {
 	b.conn.Close()
 	return nil
 }
+
+// CloseWindow sends a WM_DELETE_WINDOW message to close the window gracefully.
+func (b *X11Backend) CloseWindow(title string) error {
+	win, err := b.findByTitle(title)
+	if err != nil {
+		return err
+	}
+	// Intern WM_DELETE_WINDOW and WM_PROTOCOLS atoms.
+	delAtom, err := xproto.InternAtom(b.conn, false, 18, "WM_DELETE_WINDOW").Reply()
+	if err != nil {
+		return fmt.Errorf("window/x11: intern WM_DELETE_WINDOW: %w", err)
+	}
+	protoAtom, err := xproto.InternAtom(b.conn, false, 12, "WM_PROTOCOLS").Reply()
+	if err != nil {
+		return fmt.Errorf("window/x11: intern WM_PROTOCOLS: %w", err)
+	}
+	data := [5]uint32{uint32(delAtom.Atom), uint32(xproto.TimeCurrentTime), 0, 0, 0}
+	return xproto.SendEventChecked(b.conn, false, win, 0,
+		string(xproto.ClientMessageEvent{
+			Format: 32,
+			Window: win,
+			Type:   protoAtom.Atom,
+			Data:   xproto.ClientMessageDataUnionData32New(data[:]),
+		}.Bytes())).Check()
+}
+
+// Minimize iconifies the window by setting _NET_WM_STATE_HIDDEN via the WM.
+func (b *X11Backend) Minimize(title string) error {
+	win, err := b.findByTitle(title)
+	if err != nil {
+		return err
+	}
+	// Use XIconifyWindow via ChangeProperty with WM_CHANGE_STATE.
+	csAtom, err := xproto.InternAtom(b.conn, false, 15, "WM_CHANGE_STATE").Reply()
+	if err != nil {
+		return fmt.Errorf("window/x11: intern WM_CHANGE_STATE: %w", err)
+	}
+	data := [5]uint32{3 /* IconicState */, 0, 0, 0, 0}
+	return xproto.SendEventChecked(b.conn, false, b.root,
+		xproto.EventMaskSubstructureRedirect|xproto.EventMaskSubstructureNotify,
+		string(xproto.ClientMessageEvent{
+			Format: 32,
+			Window: win,
+			Type:   csAtom.Atom,
+			Data:   xproto.ClientMessageDataUnionData32New(data[:]),
+		}.Bytes())).Check()
+}
+
+// Maximize sets _NET_WM_STATE_MAXIMIZED_VERT and _NET_WM_STATE_MAXIMIZED_HORZ.
+func (b *X11Backend) Maximize(title string) error {
+	win, err := b.findByTitle(title)
+	if err != nil {
+		return err
+	}
+	stateAtom, err := xproto.InternAtom(b.conn, false, 14, "_NET_WM_STATE").Reply()
+	if err != nil {
+		return fmt.Errorf("window/x11: intern _NET_WM_STATE: %w", err)
+	}
+	maxV, err := xproto.InternAtom(b.conn, false, 28, "_NET_WM_STATE_MAXIMIZED_VERT").Reply()
+	if err != nil {
+		return fmt.Errorf("window/x11: intern _NET_WM_STATE_MAXIMIZED_VERT: %w", err)
+	}
+	maxH, err := xproto.InternAtom(b.conn, false, 28, "_NET_WM_STATE_MAXIMIZED_HORZ").Reply()
+	if err != nil {
+		return fmt.Errorf("window/x11: intern _NET_WM_STATE_MAXIMIZED_HORZ: %w", err)
+	}
+	data := [5]uint32{1 /* _NET_WM_STATE_ADD */, uint32(maxV.Atom), uint32(maxH.Atom), 1 /* source = application */, 0}
+	return xproto.SendEventChecked(b.conn, false, b.root,
+		xproto.EventMaskSubstructureRedirect|xproto.EventMaskSubstructureNotify,
+		string(xproto.ClientMessageEvent{
+			Format: 32,
+			Window: win,
+			Type:   stateAtom.Atom,
+			Data:   xproto.ClientMessageDataUnionData32New(data[:]),
+		}.Bytes())).Check()
+}

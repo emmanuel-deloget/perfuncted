@@ -267,3 +267,48 @@ func (k *KWinScriptManager) Resize(title string, w, h int) error {
 
 // Close is a no-op; the session bus connection is shared and managed globally.
 func (k *KWinScriptManager) Close() error { return nil }
+
+// CloseWindow closes the first window whose title contains substr.
+func (k *KWinScriptManager) CloseWindow(title string) error {
+	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
+	result, err := k.runScript(func(svc string) string {
+		return kwinFindWindowScript(safe, svc, "w.closeWindow();")
+	})
+	if err != nil {
+		return err
+	}
+	if result == "" {
+		return fmt.Errorf("window: window matching %q not found", title)
+	}
+	return nil
+}
+
+// Minimize minimizes the first window whose title contains substr.
+func (k *KWinScriptManager) Minimize(title string) error {
+	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
+	result, err := k.runScript(func(svc string) string {
+		return kwinFindWindowScript(safe, svc, "w.minimized = true;")
+	})
+	if err != nil {
+		return err
+	}
+	if result == "" {
+		return fmt.Errorf("window: window matching %q not found", title)
+	}
+	return nil
+}
+
+// Maximize maximizes the first window whose title contains substr.
+func (k *KWinScriptManager) Maximize(title string) error {
+	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
+	result, err := k.runScript(func(svc string) string {
+		return kwinFindWindowScript(safe, svc, "w.setMaximize(true, true);")
+	})
+	if err != nil {
+		return err
+	}
+	if result == "" {
+		return fmt.Errorf("window: window matching %q not found", title)
+	}
+	return nil
+}

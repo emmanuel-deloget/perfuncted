@@ -217,17 +217,18 @@ func (b *WlVirtualBackend) KeyDown(key string) error { return b.kbd.pressKey(key
 // KeyUp releases a previously held key.
 func (b *WlVirtualBackend) KeyUp(key string) error { return b.kbd.releaseKey(key) }
 
-// scroll sends a vertical axis event for the given number of discrete scroll notches.
-// Positive values scroll down; negative values scroll up.
-func (b *WlVirtualBackend) scroll(clicks int) error {
-	// wl_pointer.axis: axis=0 (vertical), value in wl_fixed_t (24.8 fixed-point).
+// scroll sends an axis event for the given number of discrete scroll notches.
+// axis 0 = vertical, axis 1 = horizontal. Positive values scroll down/right;
+// negative values scroll up/left.
+func (b *WlVirtualBackend) scroll(axis uint32, clicks int) error {
+	// wl_pointer.axis: value in wl_fixed_t (24.8 fixed-point).
 	// Convention: ~15 pixels per discrete scroll notch.
 	value := int32(clicks * 15 * 256) // wl_fixed_t
 	var buf [20]byte
 	wl.PutUint32(buf[0:], b.ptr.ID())
 	wl.PutUint32(buf[4:], 20<<16|3) // size=20, opcode=3 (axis)
 	wl.PutUint32(buf[8:], b.now())
-	wl.PutUint32(buf[12:], 0)             // axis=0 (vertical)
+	wl.PutUint32(buf[12:], axis)          // 0=vertical, 1=horizontal
 	wl.PutUint32(buf[16:], uint32(value)) // wl_fixed_t signed value
 	if err := b.display.Context().WriteMsg(buf[:], nil); err != nil {
 		return err
@@ -236,10 +237,16 @@ func (b *WlVirtualBackend) scroll(clicks int) error {
 }
 
 // ScrollUp scrolls the mouse wheel up by the given number of notches.
-func (b *WlVirtualBackend) ScrollUp(clicks int) error { return b.scroll(-clicks) }
+func (b *WlVirtualBackend) ScrollUp(clicks int) error { return b.scroll(0, -clicks) }
 
 // ScrollDown scrolls the mouse wheel down by the given number of notches.
-func (b *WlVirtualBackend) ScrollDown(clicks int) error { return b.scroll(clicks) }
+func (b *WlVirtualBackend) ScrollDown(clicks int) error { return b.scroll(0, clicks) }
+
+// ScrollLeft scrolls the mouse wheel left by the given number of notches.
+func (b *WlVirtualBackend) ScrollLeft(clicks int) error { return b.scroll(1, -clicks) }
+
+// ScrollRight scrolls the mouse wheel right by the given number of notches.
+func (b *WlVirtualBackend) ScrollRight(clicks int) error { return b.scroll(1, clicks) }
 
 // Close closes the Wayland connection.
 func (b *WlVirtualBackend) Close() error { return b.display.Context().Close() }

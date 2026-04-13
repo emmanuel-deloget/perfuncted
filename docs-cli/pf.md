@@ -13,6 +13,7 @@ perfuncted — screen automation CLI
 
 ### SEE ALSO
 
+* [pf clipboard](pf_clipboard.md)	 - Clipboard operations
 * [pf completion](pf_completion.md)	 - Generate the autocompletion script for the specified shell
 * [pf docs](pf_docs.md)	 - Generate markdown documentation for the CLI
 * [pf find](pf_find.md)	 - Pixel scanning and wait utilities

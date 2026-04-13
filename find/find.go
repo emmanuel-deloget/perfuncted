@@ -290,3 +290,53 @@ func WaitWithTolerance(ctx context.Context, sc Screenshotter, expectedRect image
 		}
 	}
 }
+
+// FindColor scans rect for the first pixel whose colour is within tolerance of
+// target. Returns the absolute (x, y) of the match. Tolerance is applied per
+// channel: |r-r'| ≤ tol && |g-g'| ≤ tol && |b-b'| ≤ tol.
+func FindColor(sc Screenshotter, rect image.Rectangle, target color.RGBA, tolerance int) (image.Point, error) {
+	img, err := sc.Grab(rect)
+	if err != nil {
+		return image.Point{}, fmt.Errorf("find: find-color grab: %w", err)
+	}
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+			if colorClose(c, target, tolerance) {
+				return image.Pt(rect.Min.X+x-b.Min.X, rect.Min.Y+y-b.Min.Y), nil
+			}
+		}
+	}
+	return image.Point{}, fmt.Errorf("find: colour #%02x%02x%02x not found (tolerance=%d)", target.R, target.G, target.B, tolerance)
+}
+
+func colorClose(a, b color.RGBA, tol int) bool {
+	return abs(int(a.R)-int(b.R)) <= tol &&
+		abs(int(a.G)-int(b.G)) <= tol &&
+		abs(int(a.B)-int(b.B)) <= tol
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// WaitForLocate polls searchArea every poll interval until reference is found
+// via exact pixel matching, or ctx expires. Returns the absolute rectangle
+// where the reference was located.
+func WaitForLocate(ctx context.Context, sc Screenshotter, searchArea image.Rectangle, reference image.Image, poll time.Duration) (image.Rectangle, error) {
+	for {
+		r, err := LocateExact(sc, searchArea, reference)
+		if err == nil {
+			return r, nil
+		}
+		select {
+		case <-ctx.Done():
+			return image.Rectangle{}, fmt.Errorf("find: timeout waiting to locate reference image: %w", ctx.Err())
+		case <-time.After(poll):
+		}
+	}
+}

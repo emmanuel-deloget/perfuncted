@@ -130,4 +130,13 @@ func (m *WaylandWindowManager) Move(_ string, _, _ int) error { return ErrNotSup
 // Resize returns ErrNotSupported; Wayland does not allow clients to resize windows.
 func (m *WaylandWindowManager) Resize(_ string, _, _ int) error { return ErrNotSupported }
 
+// CloseWindow returns ErrNotSupported; the foreign-toplevel protocol does not expose close.
+func (m *WaylandWindowManager) CloseWindow(_ string) error { return ErrNotSupported }
+
+// Minimize returns ErrNotSupported.
+func (m *WaylandWindowManager) Minimize(_ string) error { return ErrNotSupported }
+
+// Maximize returns ErrNotSupported.
+func (m *WaylandWindowManager) Maximize(_ string) error { return ErrNotSupported }
+
 func (m *WaylandWindowManager) Close() error { return m.display.Context().Close() }

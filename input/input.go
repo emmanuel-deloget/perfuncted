@@ -39,6 +39,10 @@ type Inputter interface {
 	ScrollUp(clicks int) error
 	// ScrollDown scrolls the mouse wheel down by the given number of notches.
 	ScrollDown(clicks int) error
+	// ScrollLeft scrolls the mouse wheel left by the given number of notches.
+	ScrollLeft(clicks int) error
+	// ScrollRight scrolls the mouse wheel right by the given number of notches.
+	ScrollRight(clicks int) error
 	// Close releases all backend resources.
 	Close() error
 }

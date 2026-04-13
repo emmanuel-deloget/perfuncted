@@ -282,6 +282,22 @@ func (b *UinputBackend) ScrollDown(clicks int) error {
 	return b.mouse.Wheel(false, int32(clicks))
 }
 
+// ScrollLeft scrolls the mouse wheel left by the given number of notches.
+func (b *UinputBackend) ScrollLeft(clicks int) error {
+	if err := b.ensureMouse(); err != nil {
+		return err
+	}
+	return b.mouse.Wheel(true, int32(-clicks))
+}
+
+// ScrollRight scrolls the mouse wheel right by the given number of notches.
+func (b *UinputBackend) ScrollRight(clicks int) error {
+	if err := b.ensureMouse(); err != nil {
+		return err
+	}
+	return b.mouse.Wheel(true, int32(clicks))
+}
+
 func (b *UinputBackend) Close() error {
 	var errs []error
 	if err := b.kb.Close(); err != nil {

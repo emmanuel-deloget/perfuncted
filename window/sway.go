@@ -218,6 +218,33 @@ func (m *SwayManager) Resize(substr string, width, height int) error {
 // Close is a no-op; the sway IPC socket is not kept open between calls.
 func (m *SwayManager) Close() error { return nil }
 
+// CloseWindow kills the first window whose title contains substr.
+func (m *SwayManager) CloseWindow(substr string) error {
+	w, err := m.findWindow(substr)
+	if err != nil {
+		return err
+	}
+	return m.swayCmd(fmt.Sprintf("[con_id=%d] kill", int64(w.ID)))
+}
+
+// Minimize moves the first matching window to the scratchpad (sway's minimization).
+func (m *SwayManager) Minimize(substr string) error {
+	w, err := m.findWindow(substr)
+	if err != nil {
+		return err
+	}
+	return m.swayCmd(fmt.Sprintf("[con_id=%d] move scratchpad", int64(w.ID)))
+}
+
+// Maximize toggles fullscreen on the first matching window.
+func (m *SwayManager) Maximize(substr string) error {
+	w, err := m.findWindow(substr)
+	if err != nil {
+		return err
+	}
+	return m.swayCmd(fmt.Sprintf("[con_id=%d] fullscreen enable", int64(w.ID)))
+}
+
 // swayQuery sends a single IPC request and returns the raw JSON response.
 // Each call opens and closes its own connection to avoid state management.
 // A 5-second deadline covers connect + write + read to avoid hangs on

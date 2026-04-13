@@ -193,8 +193,24 @@ func (b *WlrScreencopyBackend) Grab(rect image.Rectangle) (image.Image, error) {
 	// Decode ARGB8888/XRGB8888 (stored as BGRA on little-endian x86).
 	img := decodeBGRA(pixels, int(bi.width), int(bi.height), int(bi.stride))
 
+	// Empty/zero rect means return the full output.
+	if rect.Dx() <= 0 || rect.Dy() <= 0 {
+		return img, nil
+	}
+
 	// Crop to requested rect.
 	return cropRGBA(img, rect), nil
+}
+
+// Resolution returns the output resolution by performing a full screencopy
+// and reading the buffer dimensions from the compositor.
+func (b *WlrScreencopyBackend) Resolution() (int, int, error) {
+	img, err := b.Grab(image.Rect(0, 0, 0, 0))
+	if err != nil {
+		return 0, 0, err
+	}
+	bounds := img.Bounds()
+	return bounds.Dx(), bounds.Dy(), nil
 }
 
 func (b *WlrScreencopyBackend) Close() error { return nil }

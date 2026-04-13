@@ -40,6 +40,12 @@ type Manager interface {
 	Resize(title string, w, h int) error
 	// ActiveTitle returns the title of the currently focused window.
 	ActiveTitle() (string, error)
+	// CloseWindow closes the window matching title.
+	CloseWindow(title string) error
+	// Minimize minimizes the window matching title.
+	Minimize(title string) error
+	// Maximize maximizes the window matching title.
+	Maximize(title string) error
 	// Close releases backend resources.
 	Close() error
 }
@@ -65,7 +71,11 @@ func Open() (Manager, error) {
 		return m, nil
 
 	case compositor.GNOME:
-		return nil, fmt.Errorf("window: GNOME Wayland requires a nested wlroots compositor")
+		m, err := NewGnomeManager()
+		if err != nil {
+			return nil, fmt.Errorf("window: GNOME Shell Eval not available: %w", err)
+		}
+		return m, nil
 
 	case compositor.Unknown:
 		if m, err := NewWaylandWindowManager(); err == nil {

@@ -19,6 +19,32 @@ type Screenshotter interface {
 	Close() error
 }
 
+// Resolver reports the output resolution. Backends that track output geometry
+// (e.g. via wl_output mode events) implement this directly. For backends that
+// don't, Resolution() falls back to a full-screen grab.
+type Resolver interface {
+	Resolution() (width, height int, err error)
+}
+
+// Resolution returns the screen resolution of sc. If sc implements Resolver
+// directly, that is used. Otherwise, a full-output grab (zero rect) is tried.
+func Resolution(sc Screenshotter) (int, int, error) {
+	if r, ok := sc.(Resolver); ok {
+		return r.Resolution()
+	}
+	// Fallback: grab with a zero rect — backends that support it return the
+	// full output image. The image bounds reveal the output size.
+	img, err := sc.Grab(image.Rect(0, 0, 0, 0))
+	if err != nil {
+		return 0, 0, fmt.Errorf("screen: resolution probe: %w", err)
+	}
+	b := img.Bounds()
+	if b.Dx() == 0 || b.Dy() == 0 {
+		return 0, 0, fmt.Errorf("screen: resolution probe returned zero-size image")
+	}
+	return b.Dx(), b.Dy(), nil
+}
+
 // Open returns the best available Screenshotter for the current environment.
 func Open() (Screenshotter, error) {
 	switch compositor.Detect() {

@@ -651,6 +651,77 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	} else {
 		r.fail("Resize: unexpected error: %v", resizeErr)
 	}
+
+	// ── New features ─────────────────────────────────────────────────────────
+	r.section("NEW FEATURES [" + app.name + "]")
+
+	// Screen resolution
+	w, h, resErr := pf.Screen.Resolution()
+	if resErr == nil && w > 0 && h > 0 {
+		r.pass("Resolution: %dx%d", w, h)
+	} else if resErr != nil {
+		r.fail("Resolution: %v", resErr)
+	} else {
+		r.fail("Resolution: got %dx%d", w, h)
+	}
+
+	// FindColor — grab the actual pixel at (0,0) and search for it, proving
+	// the FindColor functionality works regardless of background color.
+	debugPixel, pixErr := pf.Screen.FirstPixel(image.Rect(0, 0, 1, 1))
+	if pixErr != nil {
+		r.fail("FindColor (setup): %v", pixErr)
+	} else {
+		pt, fcErr := pf.Screen.FindColor(image.Rect(0, 0, 10, 10), debugPixel, 5)
+		if fcErr == nil {
+			r.pass("FindColor: found pixel R=%d G=%d B=%d at (%d,%d)", debugPixel.R, debugPixel.G, debugPixel.B, pt.X, pt.Y)
+		} else {
+			r.fail("FindColor: looking for R=%d G=%d B=%d: %v", debugPixel.R, debugPixel.G, debugPixel.B, fcErr)
+		}
+	}
+
+	// Clipboard round-trip
+	if pf.Clipboard != nil {
+		marker := fmt.Sprintf("perfuncted-clip-%d", time.Now().UnixNano())
+		if err := pf.Clipboard.Set(marker); err != nil {
+			r.fail("Clipboard Set: %v", err)
+		} else {
+			time.Sleep(200 * time.Millisecond)
+			got, err := pf.Clipboard.Get()
+			if err != nil {
+				r.fail("Clipboard Get: %v", err)
+			} else if strings.TrimSpace(got) == marker {
+				r.pass("Clipboard: round-trip OK")
+			} else {
+				r.fail("Clipboard: expected %q got %q", marker, got)
+			}
+		}
+	} else {
+		r.pass("Clipboard: not available (skipped)")
+	}
+
+	// Horizontal scroll (just test that the call succeeds)
+	if err := pf.Input.ScrollLeft(1); err != nil {
+		r.fail("ScrollLeft: %v", err)
+	} else {
+		r.pass("ScrollLeft: 1 click")
+	}
+	if err := pf.Input.ScrollRight(1); err != nil {
+		r.fail("ScrollRight: %v", err)
+	} else {
+		r.pass("ScrollRight: 1 click")
+	}
+
+	// RetryUntil — should succeed immediately
+	retryCtx, retryCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer retryCancel()
+	retryErr := perfuncted.RetryUntil(retryCtx, 100*time.Millisecond, func() error {
+		return nil
+	})
+	if retryErr == nil {
+		r.pass("RetryUntil: immediate success")
+	} else {
+		r.fail("RetryUntil: %v", retryErr)
+	}
 }
 
 // testBrowser proves perfuncted works with a real browser in a nested or headless

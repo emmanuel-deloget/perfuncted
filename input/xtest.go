@@ -165,6 +165,33 @@ func (b *XTestBackend) ScrollDown(clicks int) error {
 	return nil
 }
 
+// ScrollLeft scrolls the mouse wheel left by the given number of notches.
+// X11 scroll is button 6 (left) / 7 (right).
+func (b *XTestBackend) ScrollLeft(clicks int) error {
+	for range clicks {
+		if err := b.MouseDown(6); err != nil {
+			return err
+		}
+		if err := b.MouseUp(6); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ScrollRight scrolls the mouse wheel right by the given number of notches.
+func (b *XTestBackend) ScrollRight(clicks int) error {
+	for range clicks {
+		if err := b.MouseDown(7); err != nil {
+			return err
+		}
+		if err := b.MouseUp(7); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (b *XTestBackend) Close() error {
 	b.conn.Close()
 	return nil

@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nskaggs/perfuncted/clipboard"
 	"github.com/nskaggs/perfuncted/find"
 	"github.com/nskaggs/perfuncted/input"
 	"github.com/nskaggs/perfuncted/screen"
@@ -217,12 +218,38 @@ func (s ScreenBundle) LocateExact(searchArea image.Rectangle, reference image.Im
 	return find.LocateExact(s.Screenshotter, searchArea, reference)
 }
 
+// Resolution returns the screen width and height in pixels.
+func (s ScreenBundle) Resolution() (int, int, error) {
+	if err := s.checkAvailable(); err != nil {
+		return 0, 0, err
+	}
+	return screen.Resolution(s.Screenshotter)
+}
+
 // WaitWithTolerance waits for targetHash to appear within radius pixels of expectedRect.
 func (s ScreenBundle) WaitWithTolerance(ctx context.Context, expectedRect image.Rectangle, targetHash uint32, radius int, poll time.Duration) (uint32, image.Rectangle, error) {
 	if err := s.checkAvailable(); err != nil {
 		return 0, image.Rectangle{}, err
 	}
 	return find.WaitWithTolerance(ctx, s.Screenshotter, expectedRect, targetHash, radius, poll, nil)
+}
+
+// WaitForLocate polls searchArea until reference image is found via exact pixel
+// matching, or ctx expires.
+func (s ScreenBundle) WaitForLocate(ctx context.Context, searchArea image.Rectangle, reference image.Image, poll time.Duration) (image.Rectangle, error) {
+	if err := s.checkAvailable(); err != nil {
+		return image.Rectangle{}, err
+	}
+	return find.WaitForLocate(ctx, s.Screenshotter, searchArea, reference, poll)
+}
+
+// FindColor scans rect for the first pixel matching target colour within
+// tolerance per channel. Returns the absolute point of the match.
+func (s ScreenBundle) FindColor(rect image.Rectangle, target color.RGBA, tolerance int) (image.Point, error) {
+	if err := s.checkAvailable(); err != nil {
+		return image.Point{}, err
+	}
+	return find.FindColor(s.Screenshotter, rect, target, tolerance)
 }
 
 // WindowBundle wraps a window.Manager with additional find utilities.
@@ -264,6 +291,56 @@ func (w WindowBundle) WaitFor(ctx context.Context, pattern string, poll time.Dur
 		select {
 		case <-ctx.Done():
 			return window.Info{}, fmt.Errorf("window %q did not appear: %w", pattern, ctx.Err())
+		case <-time.After(poll):
+		}
+	}
+}
+
+// WaitForClose polls the window list until no window whose title contains
+// pattern (case-insensitive) is present, or ctx is cancelled.
+func (w WindowBundle) WaitForClose(ctx context.Context, pattern string, poll time.Duration) error {
+	lower := strings.ToLower(pattern)
+	for {
+		wins, err := w.Manager.List()
+		if err != nil {
+			return fmt.Errorf("window: list: %w", err)
+		}
+		found := false
+		for _, win := range wins {
+			if strings.Contains(strings.ToLower(win.Title), lower) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("window %q did not close: %w", pattern, ctx.Err())
+		case <-time.After(poll):
+		}
+	}
+}
+
+// WaitForTitleChange polls ActiveTitle until it differs from current, or ctx
+// is cancelled. Returns the new active title.
+func (w WindowBundle) WaitForTitleChange(ctx context.Context, poll time.Duration) (string, error) {
+	current, err := w.Manager.ActiveTitle()
+	if err != nil {
+		return "", fmt.Errorf("window: active title: %w", err)
+	}
+	for {
+		title, err := w.Manager.ActiveTitle()
+		if err != nil {
+			return "", fmt.Errorf("window: active title: %w", err)
+		}
+		if title != current {
+			return title, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("window title did not change from %q: %w", current, ctx.Err())
 		case <-time.After(poll):
 		}
 	}
@@ -351,11 +428,12 @@ func (i InputBundle) PressCombo(combo string) error {
 	return nil
 }
 
-// Perfuncted bundles auto-detected screen, input, and window backends.
+// Perfuncted bundles auto-detected screen, input, window, and clipboard backends.
 type Perfuncted struct {
-	Screen ScreenBundle
-	Input  InputBundle
-	Window WindowBundle
+	Screen    ScreenBundle
+	Input     InputBundle
+	Window    WindowBundle
+	Clipboard clipboard.Clipboard
 }
 
 // New opens all backends using auto-detection. Each backend is attempted
@@ -406,6 +484,13 @@ func New(opts Options) (*Perfuncted, error) {
 		pf.Window = WindowBundle{Manager: wm}
 	}
 
+	cb, err := clipboard.Open()
+	if err != nil {
+		errs = append(errs, fmt.Errorf("clipboard: %w", err))
+	} else {
+		pf.Clipboard = cb
+	}
+
 	if pf.Screen.Screenshotter == nil && pf.Input.Inputter == nil && pf.Window.Manager == nil {
 		return nil, fmt.Errorf("perfuncted: no backend available: %w", errors.Join(errs...))
 	}
@@ -431,4 +516,22 @@ func (pf *Perfuncted) Close() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// RetryUntil calls fn repeatedly (at most every poll) until it returns nil or
+// ctx is cancelled. The last non-nil error from fn is returned if the context
+// expires.
+func RetryUntil(ctx context.Context, poll time.Duration, fn func() error) error {
+	var lastErr error
+	for {
+		lastErr = fn()
+		if lastErr == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("retry: timed out: %w", lastErr)
+		case <-time.After(poll):
+		}
+	}
 }
