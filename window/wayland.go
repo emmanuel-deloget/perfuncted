@@ -98,7 +98,12 @@ func (m *WaylandWindowManager) fetchToplevels() error {
 }
 
 // List returns all top-level windows gathered from the foreign-toplevel protocol.
+// Each call performs a Wayland round-trip to process any pending events (new
+// windows, title changes, closures) before returning.
 func (m *WaylandWindowManager) List() ([]Info, error) {
+	if err := m.display.RoundTrip(); err != nil {
+		return nil, fmt.Errorf("window/wayland: round-trip: %w", err)
+	}
 	out := make([]Info, 0, len(m.toplevels))
 	for _, v := range m.toplevels {
 		out = append(out, *v)

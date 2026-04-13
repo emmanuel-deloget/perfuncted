@@ -29,3 +29,17 @@ func decodeBGRA(data []byte, w, h, stride int) *image.RGBA {
 	}
 	return img
 }
+
+// cropRGBA extracts the sub-rectangle rect from a full-screen RGBA image,
+// returning a new image with bounds starting at (0, 0). Pixels outside the
+// source image are left as zero (transparent black).
+func cropRGBA(src *image.RGBA, rect image.Rectangle) *image.RGBA {
+	out := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
+	sb := src.Bounds()
+	for y := rect.Min.Y; y < rect.Max.Y && y < sb.Max.Y; y++ {
+		for x := rect.Min.X; x < rect.Max.X && x < sb.Max.X; x++ {
+			out.SetRGBA(x-rect.Min.X, y-rect.Min.Y, src.RGBAAt(x, y))
+		}
+	}
+	return out
+}

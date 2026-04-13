@@ -5,6 +5,7 @@ import (
 	"image"
 	"syscall"
 
+	"github.com/nskaggs/perfuncted/internal/shmutil"
 	"github.com/nskaggs/perfuncted/internal/wl"
 )
 
@@ -122,7 +123,7 @@ func (b *ExtCaptureBackend) Grab(rect image.Rectangle) (image.Image, error) {
 
 	stride := si.width * 4
 	size := int(stride * si.height)
-	f, err := wlCreateShmFile(int64(size))
+	f, err := shmutil.CreateFile(int64(size))
 	if err != nil {
 		return nil, fmt.Errorf("screen/ext: shm file: %w", err)
 	}
@@ -206,13 +207,7 @@ func (b *ExtCaptureBackend) Grab(rect image.Rectangle) (image.Image, error) {
 	img := decodeBGRA(pixels, int(si.width), int(si.height), int(stride))
 
 	// Crop to requested rect.
-	out := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
-	for y := rect.Min.Y; y < rect.Max.Y && y < int(si.height); y++ {
-		for x := rect.Min.X; x < rect.Max.X && x < int(si.width); x++ {
-			out.SetRGBA(x-rect.Min.X, y-rect.Min.Y, img.RGBAAt(x, y))
-		}
-	}
-	return out, nil
+	return cropRGBA(img, rect), nil
 }
 
 func (b *ExtCaptureBackend) Close() error { return b.display.Context().Close() }

@@ -26,12 +26,27 @@ type Hasher func() hash.Hash32
 var DefaultHasher Hasher = func() hash.Hash32 { return crc32.NewIEEE() }
 
 // PixelHash computes a 32-bit hash of all RGBA pixels in img.
+// For *image.RGBA images it uses a fast path that reads pixel bytes directly
+// from the underlying Pix slice, avoiding per-pixel interface calls and
+// colour-model conversions.
 func PixelHash(img image.Image, newHash Hasher) uint32 {
 	if newHash == nil {
 		newHash = DefaultHasher
 	}
 	h := newHash()
 	b := img.Bounds()
+
+	// Fast path: direct Pix access for *image.RGBA.
+	if rgba, ok := img.(*image.RGBA); ok {
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			off := (y-rgba.Rect.Min.Y)*rgba.Stride + (b.Min.X-rgba.Rect.Min.X)*4
+			end := off + b.Dx()*4
+			h.Write(rgba.Pix[off:end]) //nolint:errcheck
+		}
+		return h.Sum32()
+	}
+
+	// Slow path: generic image via At() + colour model conversion.
 	buf := make([]byte, 4)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
@@ -58,7 +73,8 @@ func FirstPixel(sc Screenshotter, rect image.Rectangle) (color.RGBA, error) {
 	if err != nil {
 		return color.RGBA{}, fmt.Errorf("find: first pixel: %w", err)
 	}
-	return color.RGBAModel.Convert(img.At(0, 0)).(color.RGBA), nil
+	b := img.Bounds()
+	return color.RGBAModel.Convert(img.At(b.Min.X, b.Min.Y)).(color.RGBA), nil
 }
 
 // LastPixel returns the colour of the bottom-right pixel of rect captured from sc.
@@ -68,7 +84,8 @@ func LastPixel(sc Screenshotter, rect image.Rectangle) (color.RGBA, error) {
 	if err != nil {
 		return color.RGBA{}, fmt.Errorf("find: last pixel: %w", err)
 	}
-	return color.RGBAModel.Convert(img.At(0, 0)).(color.RGBA), nil
+	b := img.Bounds()
+	return color.RGBAModel.Convert(img.At(b.Min.X, b.Min.Y)).(color.RGBA), nil
 }
 
 // Result pairs a hash with the rectangle it was captured from.
@@ -152,6 +169,10 @@ func WaitForNoChange(ctx context.Context, sc Screenshotter, rect image.Rectangle
 	}
 }
 
+// ScanFor polls multiple regions in round-robin until one matches its expected hash,
+// or ctx expires. rects and wants must be the same length; rects[i] is compared against
+// wants[i]. Returns the first matching Result. This is useful for monitoring several
+// independent UI regions (e.g. button states, dialog presence) simultaneously.
 func ScanFor(ctx context.Context, sc Screenshotter, rects []image.Rectangle, wants []uint32, poll time.Duration, newHash Hasher) (Result, error) {
 	if len(rects) != len(wants) {
 		return Result{}, fmt.Errorf("find: ScanFor: len(rects)=%d != len(wants)=%d", len(rects), len(wants))

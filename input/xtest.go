@@ -117,20 +117,6 @@ func (b *XTestBackend) MouseMove(x, y int) error {
 		xproto.TimeCurrentTime, b.root, int16(x), int16(y), 0).Check()
 }
 
-// xButton maps button numbers to X11 button values (1=left,2=middle,3=right,4=wheelup,5=wheeldown).
-func xButton(button int) byte {
-	switch button {
-	case 1:
-		return 1
-	case 2:
-		return 2
-	case 3:
-		return 3
-	default:
-		return byte(button)
-	}
-}
-
 func (b *XTestBackend) MouseClick(x, y, button int) error {
 	if err := b.MouseMove(x, y); err != nil {
 		return err
@@ -143,13 +129,40 @@ func (b *XTestBackend) MouseClick(x, y, button int) error {
 }
 
 func (b *XTestBackend) MouseDown(button int) error {
-	return xtest.FakeInputChecked(b.conn, xproto.ButtonPress, xButton(button),
+	return xtest.FakeInputChecked(b.conn, xproto.ButtonPress, byte(button),
 		xproto.TimeCurrentTime, b.root, 0, 0, 0).Check()
 }
 
 func (b *XTestBackend) MouseUp(button int) error {
-	return xtest.FakeInputChecked(b.conn, xproto.ButtonRelease, xButton(button),
+	return xtest.FakeInputChecked(b.conn, xproto.ButtonRelease, byte(button),
 		xproto.TimeCurrentTime, b.root, 0, 0, 0).Check()
+}
+
+// ScrollUp scrolls the mouse wheel up by the given number of notches.
+// X11 scroll is button 4 (up) / 5 (down).
+func (b *XTestBackend) ScrollUp(clicks int) error {
+	for range clicks {
+		if err := b.MouseDown(4); err != nil {
+			return err
+		}
+		if err := b.MouseUp(4); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ScrollDown scrolls the mouse wheel down by the given number of notches.
+func (b *XTestBackend) ScrollDown(clicks int) error {
+	for range clicks {
+		if err := b.MouseDown(5); err != nil {
+			return err
+		}
+		if err := b.MouseUp(5); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (b *XTestBackend) Close() error {

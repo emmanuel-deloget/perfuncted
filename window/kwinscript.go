@@ -181,11 +181,12 @@ func parseInt(s string) int {
 	return 0
 }
 
-// Activate raises and focuses the first window whose title contains substr.
-func (k *KWinScriptManager) Activate(title string) error {
-	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
-	result, err := k.runScript(func(svc string) string {
-		return fmt.Sprintf(`
+// kwinFindWindowScript generates JS that iterates workspace.windowList(),
+// finds the first window whose lowercased caption contains `safe`, runs
+// actionJS on it, and calls back via callDBus with the matched caption
+// (or empty string if not found). `safe` must already be JS-safe (escaped).
+func kwinFindWindowScript(safe, svc, actionJS string) string {
+	return fmt.Sprintf(`
 var wins = workspace.windowList();
 var found = '';
 try {
@@ -193,14 +194,21 @@ try {
         var w = wins[i];
         if (w.caption.toLowerCase().indexOf('%s') !== -1) {
             found = w.caption;
-            w.minimized = false;
-            workspace.activateWindow(w);
+            %s
             break;
         }
     }
 } catch(e) {}
 callDBus('%s', '/', '%s', 'ReportWindows', found);
-`, safe, svc, svc)
+`, safe, actionJS, svc, svc)
+}
+
+// Activate raises and focuses the first window whose title contains substr.
+func (k *KWinScriptManager) Activate(title string) error {
+	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
+	result, err := k.runScript(func(svc string) string {
+		return kwinFindWindowScript(safe, svc,
+			"w.minimized = false;\n            workspace.activateWindow(w);")
 	})
 	if err != nil {
 		return err
@@ -225,22 +233,10 @@ callDBus('%s', '/', '%s', 'ReportWindows', w ? w.caption : '');
 func (k *KWinScriptManager) Move(title string, x, y int) error {
 	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
 	result, err := k.runScript(func(svc string) string {
-		return fmt.Sprintf(`
-var wins = workspace.windowList();
-var found = '';
-try {
-    for (var i = 0; i < wins.length; i++) {
-        var w = wins[i];
-        if (w.caption.toLowerCase().indexOf('%s') !== -1) {
-            found = w.caption;
-            var g = w.frameGeometry;
-            w.frameGeometry = {x: %d, y: %d, width: Math.round(g.width), height: Math.round(g.height)};
-            break;
-        }
-    }
-} catch(e) {}
-callDBus('%s', '/', '%s', 'ReportWindows', found);
-`, safe, x, y, svc, svc)
+		action := fmt.Sprintf(
+			"var g = w.frameGeometry;\n            w.frameGeometry = {x: %d, y: %d, width: Math.round(g.width), height: Math.round(g.height)};",
+			x, y)
+		return kwinFindWindowScript(safe, svc, action)
 	})
 	if err != nil {
 		return err
@@ -255,22 +251,10 @@ callDBus('%s', '/', '%s', 'ReportWindows', found);
 func (k *KWinScriptManager) Resize(title string, w, h int) error {
 	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
 	result, err := k.runScript(func(svc string) string {
-		return fmt.Sprintf(`
-var wins = workspace.windowList();
-var found = '';
-try {
-    for (var i = 0; i < wins.length; i++) {
-        var win = wins[i];
-        if (win.caption.toLowerCase().indexOf('%s') !== -1) {
-            found = win.caption;
-            var g = win.frameGeometry;
-            win.frameGeometry = {x: Math.round(g.x), y: Math.round(g.y), width: %d, height: %d};
-            break;
-        }
-    }
-} catch(e) {}
-callDBus('%s', '/', '%s', 'ReportWindows', found);
-`, safe, w, h, svc, svc)
+		action := fmt.Sprintf(
+			"var g = w.frameGeometry;\n            w.frameGeometry = {x: Math.round(g.x), y: Math.round(g.y), width: %d, height: %d};",
+			w, h)
+		return kwinFindWindowScript(safe, svc, action)
 	})
 	if err != nil {
 		return err

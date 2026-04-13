@@ -1,16 +1,21 @@
-## pf find last-pixel
+## pf find locate
 
-Print the RGB colour of the bottom-right pixel of a region
+Find a reference PNG image within a screen region
+
+### Synopsis
+
+Scans searchArea for an exact pixel match of the reference image and prints the bounding rectangle of the first match.
 
 ```
-pf find last-pixel [flags]
+pf find locate [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help          help for last-pixel
-      --rect string   x0,y0,x1,y1 (default "0,0,100,100")
+  -h, --help          help for locate
+      --rect string   search area x0,y0,x1,y1 (default "0,0,1920,1080")
+      --ref string    path to reference PNG image
 ```
 
 ### Options inherited from parent commands

@@ -34,7 +34,11 @@ import (
 // Options controls backend selection.
 type Options struct {
 	// MaxX and MaxY define the absolute coordinate space for uinput's touch-pad
-	// device. Set these to your primary monitor's resolution.
+	// device. Set these to your primary monitor's resolution. These values are
+	// only used by the uinput backend (which creates a kernel-level virtual
+	// touchpad requiring explicit axis ranges). The Wayland virtual-pointer
+	// backend (wlroots) auto-detects output dimensions from the compositor and
+	// ignores MaxX/MaxY. Defaults: 1920×1080.
 	MaxX, MaxY int32
 
 	// Nested, when true, causes New() to auto-detect a nested perfuncted sway
@@ -243,11 +247,15 @@ func (w WindowBundle) ActivateBy(pattern string) error {
 }
 
 // WaitFor polls the window list until a window whose title contains pattern
-// (case-insensitive) appears, or ctx is cancelled.
+// (case-insensitive) appears, or ctx is cancelled. List() errors are propagated
+// rather than silently swallowed.
 func (w WindowBundle) WaitFor(ctx context.Context, pattern string, poll time.Duration) (window.Info, error) {
 	lower := strings.ToLower(pattern)
 	for {
-		wins, _ := w.Manager.List()
+		wins, err := w.Manager.List()
+		if err != nil {
+			return window.Info{}, fmt.Errorf("window: list: %w", err)
+		}
 		for _, win := range wins {
 			if strings.Contains(strings.ToLower(win.Title), lower) {
 				return win, nil
@@ -273,7 +281,8 @@ func (i InputBundle) checkAvailable() error {
 	return nil
 }
 
-// DoubleClick moves to (x, y) and performs two quick left clicks.
+// DoubleClick moves to (x, y) and performs two quick left clicks with a
+// short inter-click delay so the target application registers a double-click.
 func (i InputBundle) DoubleClick(x, y int) error {
 	if err := i.checkAvailable(); err != nil {
 		return err
@@ -281,6 +290,7 @@ func (i InputBundle) DoubleClick(x, y int) error {
 	if err := i.MouseClick(x, y, 1); err != nil {
 		return err
 	}
+	time.Sleep(80 * time.Millisecond)
 	return i.MouseClick(x, y, 1)
 }
 

@@ -57,6 +57,7 @@ Run `pf help` or `pf [command] --help` for full usage. Quick reference:
 <!-- pf-cli-start -->
 ```
 pf find last-pixel                      # Print the RGB colour of the bottom-right pixel of a region
+pf find locate                          # Find a reference PNG image within a screen region
 pf find pixel-hash                      # Print the CRC32 pixel hash of a screen region
 pf find scan-for                        # Scan multiple regions until one matches its expected hash
 pf find wait-for                        # Wait until a region's pixel hash equals the provided hash
@@ -74,6 +75,7 @@ pf input keyup                          # Release a held key
 pf input mousedown                      # Press a mouse button (optional coords)
 pf input mouseup                        # Release a mouse button (optional coords)
 pf input move                           # Move mouse to absolute coordinates
+pf input scroll                         # Scroll the mouse wheel
 pf input type                           # Type a string as keyboard events
 
 pf screen checksum                      # Print the CRC32 pixel checksum of a screen region

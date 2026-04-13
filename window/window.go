@@ -26,12 +26,21 @@ type Info struct {
 }
 
 // Manager lists and controls desktop windows.
+//
+// All title-based methods use case-insensitive substring matching; the
+// first window whose title contains the given string is acted upon.
 type Manager interface {
+	// List returns all visible top-level windows.
 	List() ([]Info, error)
+	// Activate brings the window matching title to the foreground.
 	Activate(title string) error
+	// Move repositions the window matching title to (x, y).
 	Move(title string, x, y int) error
+	// Resize changes the dimensions of the window matching title.
 	Resize(title string, w, h int) error
+	// ActiveTitle returns the title of the currently focused window.
 	ActiveTitle() (string, error)
+	// Close releases backend resources.
 	Close() error
 }
 

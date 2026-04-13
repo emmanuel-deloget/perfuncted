@@ -6,11 +6,11 @@ package input
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/nskaggs/perfuncted/internal/shmutil"
 	"github.com/nskaggs/perfuncted/internal/wl"
 )
 
@@ -233,7 +233,7 @@ func (k *wlKeyboard) releaseKey(key string) error {
 
 func (k *wlKeyboard) uploadKeymap(text string) error {
 	data := text + "\x00"
-	f, err := kbdShmFile(int64(len(data)))
+	f, err := shmutil.CreateFile(int64(len(data)))
 	if err != nil {
 		return fmt.Errorf("keyboard shm: %w", err)
 	}
@@ -450,22 +450,4 @@ func uniqueRunes(s string) []rune {
 		}
 	}
 	return out
-}
-
-// kbdShmFile creates an anonymous temp file for the XKB keymap.
-func kbdShmFile(size int64) (*os.File, error) {
-	dir := os.Getenv("XDG_RUNTIME_DIR")
-	if dir == "" {
-		return nil, fmt.Errorf("XDG_RUNTIME_DIR not set")
-	}
-	f, err := os.CreateTemp(dir, "perfuncted-kbd-*")
-	if err != nil {
-		return nil, err
-	}
-	if err := f.Truncate(size); err != nil {
-		f.Close()
-		return nil, err
-	}
-	os.Remove(f.Name()) //nolint:errcheck
-	return f, nil
 }

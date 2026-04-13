@@ -14,15 +14,32 @@ import (
 )
 
 // Inputter injects keyboard and mouse events.
+//
+// Keyboard methods accept key names ("a", "ctrl", "return", "f5", etc.).
+// Mouse methods use screen-absolute pixel coordinates; button 1=left,
+// 2=middle, 3=right. Scroll methods accept a positive click count.
 type Inputter interface {
+	// KeyDown presses and holds a key.
 	KeyDown(key string) error
+	// KeyUp releases a previously held key.
 	KeyUp(key string) error
+	// KeyTap presses and immediately releases a key.
 	KeyTap(key string) error
+	// Type sends a string as a sequence of key events.
 	Type(s string) error
+	// MouseMove moves the pointer to absolute coordinates (x, y).
 	MouseMove(x, y int) error
+	// MouseClick moves to (x, y) and clicks the given button.
 	MouseClick(x, y, button int) error
+	// MouseDown presses (but does not release) a mouse button.
 	MouseDown(button int) error
+	// MouseUp releases a previously pressed mouse button.
 	MouseUp(button int) error
+	// ScrollUp scrolls the mouse wheel up by the given number of notches.
+	ScrollUp(clicks int) error
+	// ScrollDown scrolls the mouse wheel down by the given number of notches.
+	ScrollDown(clicks int) error
+	// Close releases all backend resources.
 	Close() error
 }
 

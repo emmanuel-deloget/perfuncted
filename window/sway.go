@@ -220,12 +220,15 @@ func (m *SwayManager) Close() error { return nil }
 
 // swayQuery sends a single IPC request and returns the raw JSON response.
 // Each call opens and closes its own connection to avoid state management.
+// A 5-second deadline covers connect + write + read to avoid hangs on
+// unresponsive sway instances.
 func swayQuery(sock string, msgType uint32, payload string) ([]byte, error) {
-	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: sock, Net: "unix"})
+	conn, err := net.DialTimeout("unix", sock, 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
 
 	// Write: magic(6) + length(4 LE) + type(4 LE) + payload
 	pb := []byte(payload)

@@ -3,9 +3,9 @@ package screen
 import (
 	"fmt"
 	"image"
-	"os"
 	"syscall"
 
+	"github.com/nskaggs/perfuncted/internal/shmutil"
 	"github.com/nskaggs/perfuncted/internal/wl"
 )
 
@@ -153,7 +153,7 @@ func (b *WlrScreencopyBackend) Grab(rect image.Rectangle) (image.Image, error) {
 
 	// Allocate shared memory for the frame.
 	size := int(bi.stride * bi.height)
-	f, err := wlCreateShmFile(int64(size))
+	f, err := shmutil.CreateFile(int64(size))
 	if err != nil {
 		return nil, fmt.Errorf("screen/wlr: shm file: %w", err)
 	}
@@ -194,13 +194,7 @@ func (b *WlrScreencopyBackend) Grab(rect image.Rectangle) (image.Image, error) {
 	img := decodeBGRA(pixels, int(bi.width), int(bi.height), int(bi.stride))
 
 	// Crop to requested rect.
-	out := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
-	for y := rect.Min.Y; y < rect.Max.Y && y < int(bi.height); y++ {
-		for x := rect.Min.X; x < rect.Max.X && x < int(bi.width); x++ {
-			out.SetRGBA(x-rect.Min.X, y-rect.Min.Y, img.RGBAAt(x, y))
-		}
-	}
-	return out, nil
+	return cropRGBA(img, rect), nil
 }
 
 func (b *WlrScreencopyBackend) Close() error { return nil }
@@ -241,22 +235,4 @@ func wlSendFrameCopy(ctx *wl.Context, frameID, bufID uint32) error {
 	wl.PutUint32(buf[4:], uint32(msgSize<<16)) // opcode 0: copy
 	wl.PutUint32(buf[8:], bufID)
 	return ctx.WriteMsg(buf[:], nil)
-}
-
-// wlCreateShmFile creates an anonymous temp file suitable for wl_shm.
-func wlCreateShmFile(size int64) (*os.File, error) {
-	dir := os.Getenv("XDG_RUNTIME_DIR")
-	if dir == "" {
-		return nil, fmt.Errorf("XDG_RUNTIME_DIR not set")
-	}
-	f, err := os.CreateTemp(dir, "perfuncted-shm-*")
-	if err != nil {
-		return nil, err
-	}
-	if err := f.Truncate(size); err != nil {
-		f.Close()
-		return nil, err
-	}
-	os.Remove(f.Name()) //nolint:errcheck
-	return f, nil
 }

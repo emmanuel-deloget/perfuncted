@@ -22,6 +22,7 @@ import (
 type UinputBackend struct {
 	kb       uinput.Keyboard
 	touchpad uinput.TouchPad
+	mouse    uinput.Mouse // lazy-initialised on first scroll
 }
 
 // NewUinputBackend opens /dev/uinput and creates virtual keyboard and touchpad devices.
@@ -238,8 +239,7 @@ func (b *UinputBackend) MouseDown(button int) error {
 	case 3:
 		return b.touchpad.RightPress()
 	default:
-		// Middle button not supported by TouchPad; treat as no-op.
-		return nil
+		return fmt.Errorf("input/uinput: unsupported mouse button %d (touchpad only supports left=1, right=3)", button)
 	}
 }
 
@@ -250,15 +250,50 @@ func (b *UinputBackend) MouseUp(button int) error {
 	case 3:
 		return b.touchpad.RightRelease()
 	default:
-		return nil
+		return fmt.Errorf("input/uinput: unsupported mouse button %d (touchpad only supports left=1, right=3)", button)
 	}
 }
 
-func (b *UinputBackend) Close() error {
-	err1 := b.kb.Close()
-	err2 := b.touchpad.Close()
-	if err1 != nil {
-		return err1
+func (b *UinputBackend) ensureMouse() error {
+	if b.mouse != nil {
+		return nil
 	}
-	return err2
+	m, err := uinput.CreateMouse("/dev/uinput", []byte("perfuncted-mouse"))
+	if err != nil {
+		return fmt.Errorf("input/uinput: create mouse for scroll: %w", err)
+	}
+	b.mouse = m
+	return nil
+}
+
+// ScrollUp scrolls the mouse wheel up by the given number of notches.
+func (b *UinputBackend) ScrollUp(clicks int) error {
+	if err := b.ensureMouse(); err != nil {
+		return err
+	}
+	return b.mouse.Wheel(false, int32(-clicks))
+}
+
+// ScrollDown scrolls the mouse wheel down by the given number of notches.
+func (b *UinputBackend) ScrollDown(clicks int) error {
+	if err := b.ensureMouse(); err != nil {
+		return err
+	}
+	return b.mouse.Wheel(false, int32(clicks))
+}
+
+func (b *UinputBackend) Close() error {
+	var errs []error
+	if err := b.kb.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	if err := b.touchpad.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	if b.mouse != nil {
+		if err := b.mouse.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
