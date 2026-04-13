@@ -52,26 +52,45 @@ go get github.com/nskaggs/perfuncted
 
 ## CLI usage
 
-See docs/cli-reference.md for a complete CLI reference and examples.
+Run `pf help` or `pf [command] --help` for full usage. Quick reference:
 
+<!-- pf-cli-start -->
 ```
-pf info                                    # show detected session and backend availability
+pf find last-pixel                      # Print the RGB colour of the bottom-right pixel of a region
+pf find pixel-hash                      # Print the CRC32 pixel hash of a screen region
+pf find scan-for                        # Scan multiple regions until one matches its expected hash
+pf find wait-for                        # Wait until a region's pixel hash equals the provided hash
+pf find wait-for-change                 # Wait until a region's pixel hash changes from an initial value
+pf find wait-for-no-change              # Wait until a region's pixel hash is stable for N consecutive samples
+pf info                                 # Probe and display supported backends for this environment
 
-pf screen grab     --rect 0,0,1920,1080 --out shot.png
-pf screen checksum --rect 100,100,200,200
-pf screen pixel    --x 960 --y 540
+pf input click                          # Click a mouse button at coordinates
+pf input click-center                   # Click the center of a rectangle
+pf input double-click                   # Double-click at coordinates
+pf input drag                           # Drag from one coordinate to another (press, move, release)
+pf input key                            # Send a key or key combination (e.g. ctrl+s, return, escape)
+pf input keydown                        # Press and hold a key
+pf input keyup                          # Release a held key
+pf input mousedown                      # Press a mouse button (optional coords)
+pf input mouseup                        # Release a mouse button (optional coords)
+pf input move                           # Move mouse to absolute coordinates
+pf input type                           # Type a string as keyboard events
 
-pf input move      --x 500 --y 300
-pf input click     --x 500 --y 300 --button 1
-pf input type      "hello world"
-pf input key       ctrl+s
+pf screen checksum                      # Print the CRC32 pixel checksum of a screen region
+pf screen grab                          # Capture a screen region and save as PNG
+pf screen pixel                         # Print the RGB colour of a single pixel
 
-pf window list
-pf window activate "Firefox"
-pf window active
-pf window move     --title "Firefox" --x 100 --y 100
-pf window resize   --title "Firefox" --w 800 --h 600
+pf session check                        # Check if the current runtime environment is ready for automation
+pf session type                         # Print whether the current session is nested or host
+
+pf window activate                      # Bring a window to the foreground by title substring
+pf window activate-by                   # Bring a window to the foreground by title substring (case-insensitive, library-guaranteed)
+pf window active                        # Print the title of the currently focused window
+pf window list                          # List all visible windows
+pf window move                          # Move a window to absolute screen coordinates
+pf window resize                        # Resize a window
 ```
+<!-- pf-cli-end -->
 
 ## Library usage
 
@@ -149,7 +168,7 @@ The integration suite runs in isolated nested Wayland/X11 sessions and never
 touches your real desktop:
 
 ```bash
-bash scripts/test-nested.sh   # Wayland → XWayland → X11
+just test-nested
 ```
 
 Optional: install `wl-clipboard` to enable clipboard round-trip verification.
@@ -159,9 +178,9 @@ Optional: install `wl-clipboard` to enable clipboard round-trip verification.
 Requires: [`just`](https://github.com/casey/just), [`staticcheck`](https://staticcheck.io).
 
 ```bash
-just check     # fmt + vet + staticcheck
-just build     # full pre-commit check then build
-just pf info   # probe backend availability on the current session
+just check       # fmt + vet + staticcheck
+just precommit   # full pre-commit gate (format, vet, lint, tidy, docs)
+just pf info     # probe backend availability on the current session
 ```
 
 ## License

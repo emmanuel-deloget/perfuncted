@@ -19,3 +19,10 @@ docs/
 perfuncted-screen.png
 perfuncted-menu-*.png
 /tmp/perfuncted-*
+
+# Scratch / dev-session artifacts (do not commit)
+ff.log
+sway.log
+primary.txt
+clipboard.txt
+/ffprof/

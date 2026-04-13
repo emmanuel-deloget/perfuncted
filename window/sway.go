@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // swayMagic is the fixed 6-byte header prefix for all sway IPC messages.
@@ -185,9 +186,23 @@ func (m *SwayManager) Move(substr string, x, y int) error {
 	if err != nil {
 		return err
 	}
-	cmd := fmt.Sprintf("[con_id=%d] floating enable; [con_id=%d] move position %d %d",
-		int64(w.ID), int64(w.ID), x, y)
-	return m.swayCmd(cmd)
+	if err := m.swayCmd(fmt.Sprintf("[con_id=%d] floating enable", int64(w.ID))); err != nil {
+		return err
+	}
+	// Wait for sway to report the window away from its tiled origin, indicating
+	// the float layout reflow is complete (up to ~500 ms).
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		wins, _ := m.List()
+		for _, win := range wins {
+			if win.ID == w.ID && (win.X != w.X || win.Y != w.Y) {
+				goto ready
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+ready:
+	return m.swayCmd(fmt.Sprintf("[con_id=%d] move position %d %d", int64(w.ID), x, y))
 }
 
 // Resize changes the dimensions of the first window whose title contains substr.
