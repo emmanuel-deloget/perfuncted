@@ -98,6 +98,8 @@ func WaitFor(ctx context.Context, sc Screenshotter, rect image.Rectangle, want u
 }
 
 // WaitForChange polls rect every poll interval until its hash differs from initial, or ctx expires.
+// It pairs with WaitForNoChange: use WaitForChange to detect when a transition begins,
+// then WaitForNoChange to detect when it ends.
 func WaitForChange(ctx context.Context, sc Screenshotter, rect image.Rectangle, initial uint32, poll time.Duration, newHash Hasher) (uint32, error) {
 	for {
 		h, err := GrabHash(sc, rect, newHash)
@@ -115,7 +117,41 @@ func WaitForChange(ctx context.Context, sc Screenshotter, rect image.Rectangle, 
 	}
 }
 
-// ScanFor polls each rect every poll interval until one matches the corresponding want hash, or ctx expires.
+// WaitForNoChange polls rect every poll interval until its pixel hash is unchanged for
+// stable consecutive samples, then returns the stable hash. It is the counterpart to
+// WaitForChange: use WaitForChange to detect when a transition begins (e.g. a click
+// triggers a page load), then WaitForNoChange to detect when it finishes settling.
+//
+// stable must be ≥ 1. A value of 5 with poll=200ms means the region must look
+// identical for one full second before returning.
+func WaitForNoChange(ctx context.Context, sc Screenshotter, rect image.Rectangle, stable int, poll time.Duration, newHash Hasher) (uint32, error) {
+	if stable <= 0 {
+		stable = 1
+	}
+	var last uint32
+	streak := 0
+	for {
+		h, err := GrabHash(sc, rect, newHash)
+		if err != nil {
+			return 0, err
+		}
+		if h == last {
+			streak++
+			if streak >= stable {
+				return h, nil
+			}
+		} else {
+			last = h
+			streak = 1
+		}
+		select {
+		case <-ctx.Done():
+			return last, fmt.Errorf("find: WaitForNoChange timeout: region still changing after %d/%d stable samples (last hash %08x)", streak, stable, last)
+		case <-time.After(poll):
+		}
+	}
+}
+
 func ScanFor(ctx context.Context, sc Screenshotter, rects []image.Rectangle, wants []uint32, poll time.Duration, newHash Hasher) (Result, error) {
 	if len(rects) != len(wants) {
 		return Result{}, fmt.Errorf("find: ScanFor: len(rects)=%d != len(wants)=%d", len(rects), len(wants))

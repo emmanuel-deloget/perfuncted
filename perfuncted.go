@@ -19,6 +19,9 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -33,6 +36,78 @@ type Options struct {
 	// MaxX and MaxY define the absolute coordinate space for uinput's touch-pad
 	// device. Set these to your primary monitor's resolution.
 	MaxX, MaxY int32
+
+	// Nested, when true, causes New() to auto-detect a nested perfuncted sway
+	// session in /tmp/perfuncted-xdg-* and switch the process environment to
+	// target that session instead of the host desktop.
+	Nested bool
+}
+
+// NestedEnv scans /tmp/perfuncted-xdg-* directories created by `just nested` and
+// returns the environment variables needed to connect to a nested sway session.
+// Returns the XDG_RUNTIME_DIR, WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS, and
+// an error if no nested session is found.
+func NestedEnv() (xdgRuntimeDir, waylandDisplay, dbusAddr string, err error) {
+	matches, err := filepath.Glob("/tmp/perfuncted-xdg-*")
+	if err != nil {
+		return "", "", "", fmt.Errorf("perfuncted: glob nested sessions: %w", err)
+	}
+	if len(matches) == 0 {
+		return "", "", "", fmt.Errorf("perfuncted: no nested session found in /tmp/perfuncted-xdg-*")
+	}
+	if len(matches) > 1 {
+		return "", "", "", fmt.Errorf("perfuncted: multiple nested sessions found (%d), specify env vars manually", len(matches))
+	}
+
+	xdgDir := matches[0]
+
+	// Find the wayland-* socket (not the .lock file)
+	sockets, err := filepath.Glob(filepath.Join(xdgDir, "wayland-*"))
+	if err != nil {
+		return "", "", "", fmt.Errorf("perfuncted: glob wayland sockets: %w", err)
+	}
+	var wlSocket string
+	for _, sock := range sockets {
+		if !strings.HasSuffix(sock, ".lock") {
+			wlSocket = filepath.Base(sock)
+			break
+		}
+	}
+	if wlSocket == "" {
+		return "", "", "", fmt.Errorf("perfuncted: no wayland socket in %s", xdgDir)
+	}
+
+	return xdgDir, wlSocket, fmt.Sprintf("unix:path=%s/bus", xdgDir), nil
+}
+
+// DetectSession reports which session the current environment targets.
+// Returns "nested", "host", or "unknown", with a details map for each.
+func DetectSession() (kind string, details map[string]string) {
+	details = make(map[string]string)
+
+	xdg := os.Getenv("XDG_RUNTIME_DIR")
+	wd := os.Getenv("WAYLAND_DISPLAY")
+
+	// Check if this is a perfuncted nested session
+	if strings.HasPrefix(xdg, "/tmp/perfuncted-xdg-") {
+		details["dir"] = xdg
+		details["wayland_display"] = wd
+		details["dbus_address"] = os.Getenv("DBUS_SESSION_BUS_ADDRESS")
+		return "nested", details
+	}
+
+	// Check if a nested session exists but we're not connected to it
+	matches, err := filepath.Glob("/tmp/perfuncted-xdg-*")
+	if err == nil && len(matches) > 0 {
+		details["available_session"] = matches[0]
+		details["current_xdg"] = xdg
+		details["current_wayland"] = wd
+		return "host", details
+	}
+
+	details["current_xdg"] = xdg
+	details["current_wayland"] = wd
+	return "host", details
 }
 
 // ScreenBundle wraps a screen.Screenshotter with additional find utilities.
@@ -49,11 +124,94 @@ func (s ScreenBundle) GrabHash(rect image.Rectangle) (uint32, error) {
 }
 
 // WaitForChange polls rect every poll interval until its hash differs from initial.
+// It pairs with WaitForNoChange: use WaitForChange to detect when a transition begins,
+// then WaitForNoChange to detect when it ends.
 func (s ScreenBundle) WaitForChange(ctx context.Context, rect image.Rectangle, initial uint32, poll time.Duration) (uint32, error) {
 	if s.Screenshotter == nil {
 		return 0, fmt.Errorf("screen: not available")
 	}
 	return find.WaitForChange(ctx, s.Screenshotter, rect, initial, poll, nil)
+}
+
+// WaitForNoChange polls rect until its pixel hash is unchanged for stable consecutive
+// samples. Use after WaitForChange (or after triggering an action) to detect when the
+// UI has finished settling — e.g. a page has loaded, a dialog closed.
+//
+// stable must be ≥ 1; a value of 5 at 200ms poll requires one second of visual stability.
+func (s ScreenBundle) WaitForNoChange(ctx context.Context, rect image.Rectangle, stable int, poll time.Duration) (uint32, error) {
+	if s.Screenshotter == nil {
+		return 0, fmt.Errorf("screen: not available")
+	}
+	return find.WaitForNoChange(ctx, s.Screenshotter, rect, stable, poll, nil)
+}
+
+// WaitForSettle captures the initial hash of rect, calls action, waits for the region to
+// change (WaitForChange), then waits for it to stop changing (WaitForNoChange). This is the
+// canonical "do something and wait for the UI to finish responding" primitive.
+//
+// stable controls how many consecutive identical samples count as settled.
+// A value of 5 at 200ms poll means one second of visual stability.
+func (s ScreenBundle) WaitForSettle(ctx context.Context, rect image.Rectangle, action func(), stable int, poll time.Duration) (uint32, error) {
+	if s.Screenshotter == nil {
+		return 0, fmt.Errorf("screen: not available")
+	}
+	before, err := find.GrabHash(s.Screenshotter, rect, nil)
+	if err != nil {
+		return 0, err
+	}
+	action()
+	if _, err := find.WaitForChange(ctx, s.Screenshotter, rect, before, poll, nil); err != nil {
+		return 0, err
+	}
+	return find.WaitForNoChange(ctx, s.Screenshotter, rect, stable, poll, nil)
+}
+
+// FirstPixel returns the colour of the top-left pixel of rect.
+func (s ScreenBundle) FirstPixel(rect image.Rectangle) (color.RGBA, error) {
+	if s.Screenshotter == nil {
+		return color.RGBA{}, fmt.Errorf("screen: not available")
+	}
+	return find.FirstPixel(s.Screenshotter, rect)
+}
+
+// LastPixel returns the colour of the bottom-right pixel of rect.
+func (s ScreenBundle) LastPixel(rect image.Rectangle) (color.RGBA, error) {
+	if s.Screenshotter == nil {
+		return color.RGBA{}, fmt.Errorf("screen: not available")
+	}
+	return find.LastPixel(s.Screenshotter, rect)
+}
+
+// WaitFor polls rect until its hash equals want.
+func (s ScreenBundle) WaitFor(ctx context.Context, rect image.Rectangle, want uint32, poll time.Duration) (uint32, error) {
+	if s.Screenshotter == nil {
+		return 0, fmt.Errorf("screen: not available")
+	}
+	return find.WaitFor(ctx, s.Screenshotter, rect, want, poll, nil)
+}
+
+// ScanFor polls multiple regions until one matches its expected hash.
+func (s ScreenBundle) ScanFor(ctx context.Context, rects []image.Rectangle, wants []uint32, poll time.Duration) (find.Result, error) {
+	if s.Screenshotter == nil {
+		return find.Result{}, fmt.Errorf("screen: not available")
+	}
+	return find.ScanFor(ctx, s.Screenshotter, rects, wants, poll, nil)
+}
+
+// LocateExact searches for reference image within searchArea using exact pixel matching.
+func (s ScreenBundle) LocateExact(searchArea image.Rectangle, reference image.Image) (image.Rectangle, error) {
+	if s.Screenshotter == nil {
+		return image.Rectangle{}, fmt.Errorf("screen: not available")
+	}
+	return find.LocateExact(s.Screenshotter, searchArea, reference)
+}
+
+// WaitWithTolerance waits for targetHash to appear within radius pixels of expectedRect.
+func (s ScreenBundle) WaitWithTolerance(ctx context.Context, expectedRect image.Rectangle, targetHash uint32, radius int, poll time.Duration) (uint32, image.Rectangle, error) {
+	if s.Screenshotter == nil {
+		return 0, image.Rectangle{}, fmt.Errorf("screen: not available")
+	}
+	return find.WaitWithTolerance(ctx, s.Screenshotter, expectedRect, targetHash, radius, poll, nil)
 }
 
 // WindowBundle wraps a window.Manager with additional find utilities.
@@ -131,7 +289,20 @@ type Perfuncted struct {
 // New opens all backends using auto-detection. Each backend is attempted
 // independently; an error from one does not prevent the others from opening.
 // Returns an error only when no backend could be opened at all.
+//
+// When opts.Nested is true, New() auto-detects a perfuncted nested sway session
+// in /tmp/perfuncted-xdg-* and switches the process environment to target it.
 func New(opts Options) (*Perfuncted, error) {
+	if opts.Nested {
+		xdg, wd, dbus, err := NestedEnv()
+		if err != nil {
+			return nil, fmt.Errorf("perfuncted: nested session: %w", err)
+		}
+		os.Setenv("XDG_RUNTIME_DIR", xdg)
+		os.Setenv("WAYLAND_DISPLAY", wd)
+		os.Setenv("DBUS_SESSION_BUS_ADDRESS", dbus)
+	}
+
 	pf := &Perfuncted{}
 	var errs []error
 

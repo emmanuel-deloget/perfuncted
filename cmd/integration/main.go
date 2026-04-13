@@ -27,11 +27,12 @@ import (
 
 // appSpec describes one application to exercise in the test run.
 type appSpec struct {
-	name     string   // display name in output
-	launch   []string // command + args; first element is the executable
-	winMatch string   // substring matched against window title (case-insensitive)
-	saveFile string   // unique path used for the E2E save test
-	extraEnv []string // additional environment variables for the subprocess
+	name      string   // display name in output
+	launch    []string // command + args; first element is the executable
+	winMatch  string   // substring matched against window title (case-insensitive)
+	saveFile  string   // unique path used for the E2E save test (empty for browsers)
+	extraEnv  []string // additional environment variables for the subprocess
+	isBrowser bool     // true → run testBrowser instead of testApp
 }
 
 // detectApps returns apps available in PATH in test order.
@@ -59,6 +60,22 @@ func detectApps() []appSpec {
 			winMatch: "pluma",
 			saveFile: fmt.Sprintf("/tmp/%s-pluma.txt", pfx),
 			extraEnv: []string{"GTK_USE_PORTAL=0"},
+		},
+		{
+			// Firefox: --no-remote --new-instance ensures a fresh process even if
+			// Firefox is already running on the host. MOZ_ENABLE_WAYLAND=1 enables
+			// the native Wayland backend (wl_seat, wl_keyboard, etc.) so perfuncted's
+			// virtual-input and screencopy backends reach it correctly.
+			// MOZ_DISABLE_CONTENT_SANDBOX=1 suppresses sandbox failures in headless
+			// environments where user namespaces are not available.
+			name:      "firefox",
+			launch:    []string{"firefox", "--no-remote", "--new-instance", "about:blank"},
+			winMatch:  "firefox",
+			isBrowser: true,
+			extraEnv: []string{
+				"MOZ_ENABLE_WAYLAND=1",
+				"MOZ_DISABLE_CONTENT_SANDBOX=1",
+			},
 		},
 	}
 	var found []appSpec
@@ -188,10 +205,14 @@ func main() {
 		}
 		apps = filtered
 	} else if len(apps) == 0 {
-		log.Fatal("no supported apps found in PATH (need kwrite or pluma)")
+		log.Fatal("no supported apps found in PATH (need kwrite, pluma, or firefox)")
 	}
 	for _, app := range apps {
-		testApp(r, sc, inp, wm, app)
+		if app.isBrowser {
+			testBrowser(r, sc, inp, wm, app)
+		} else {
+			testApp(r, sc, inp, wm, app)
+		}
 	}
 
 	r.summary()
@@ -464,6 +485,16 @@ func testApp(r *results, sc screen.Screenshotter, inp input.Inputter, wm window.
 		r.pass("ScanFor: matched rect %v (hash %d)", scanResult.Rect, scanResult.Hash)
 	}
 
+	// WaitForNoChange: the settled menu bar should be stable immediately.
+	ctxNC, cancelNC := context.WithTimeout(context.Background(), 5*time.Second)
+	stableHash, ncErr := find.WaitForNoChange(ctxNC, sc, menuBarRect, 3, 100*time.Millisecond, nil)
+	cancelNC()
+	if ncErr != nil {
+		r.fail("WaitForNoChange: static region did not stabilise: %v", ncErr)
+	} else {
+		r.pass("WaitForNoChange: menu bar stable at %08x", stableHash)
+	}
+
 	// ── E2E ──────────────────────────────────────────────────────────────────
 	// End-to-end: clear the editor, type a unique marker, verify it reached
 	// the app via clipboard (primary check), then attempt a Ctrl+S file save
@@ -560,7 +591,172 @@ func testApp(r *results, sc screen.Screenshotter, inp input.Inputter, wm window.
 	}
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// testBrowser proves perfuncted works with a real browser in a nested or headless
+// session. It launches Firefox on about:blank, then navigates to about:support
+// (a static info page) using Ctrl+L. WaitForChange detects the navigation start;
+// WaitForNoChange detects the page finishing. This is the core primitive for
+// browser automation with perfuncted.
+func testBrowser(r *results, sc screen.Screenshotter, inp input.Inputter, wm window.Manager, app appSpec) {
+	pfx := os.Getenv("PF_TEST_PREFIX")
+	if pfx == "" {
+		pfx = "perfuncted"
+	}
+
+	// ── Window ───────────────────────────────────────────────────────────────
+	r.section("WINDOW [" + app.name + "]")
+
+	proc := exec.Command(app.launch[0], app.launch[1:]...)
+	if len(app.extraEnv) > 0 {
+		proc.Env = append(os.Environ(), app.extraEnv...)
+	}
+	if err := proc.Start(); err != nil {
+		r.fail("%s launch: %v", app.launch[0], err)
+		return
+	}
+	defer proc.Process.Kill() //nolint:errcheck
+
+	// Firefox takes longer to start than text editors.
+	info, err := waitForWindow(wm, app.winMatch, 90*time.Second)
+	r.check("window appeared in list", err)
+	if err != nil {
+		return
+	}
+	r.pass("found: %q (id=0x%x)", info.Title, info.ID)
+
+	if err := wm.Activate(info.Title); err != nil {
+		r.fail("Activate: %v", err)
+	} else {
+		r.pass("Activate %s", app.name)
+	}
+	// Wait for Firefox to finish painting its initial UI before we hash the screen.
+	time.Sleep(2 * time.Second)
+
+	active, err := wm.ActiveTitle()
+	r.check("read ActiveTitle", err)
+	if err == nil {
+		// Firefox sets the title to the page title; accept any title that at least
+		// shows the browser is foreground (we don't require "firefox" in the title
+		// since Firefox may display "New Tab" or "about:blank" as the title).
+		r.pass("ActiveTitle: %q", active)
+	}
+
+	// ── Screen ───────────────────────────────────────────────────────────────
+	r.section("SCREEN [" + app.name + "]")
+
+	winX, winY := info.X, info.Y
+	winRect := image.Rect(winX, winY, winX+info.W, winY+info.H)
+	r.pass("window rect: %v", winRect)
+
+	hashBefore, err := find.GrabHash(sc, winRect, nil)
+	r.check("grab window before navigation", err)
+	if err != nil {
+		return
+	}
+	r.pass("initial hash: %08x", hashBefore)
+
+	// Save a screenshot for visual inspection.
+	fpath := fmt.Sprintf("/tmp/%s-firefox-before.png", pfx)
+	savePNG2(sc, winRect, fpath)
+	r.pass("screenshot before navigation -> %s", fpath)
+
+	// ── Mouse ────────────────────────────────────────────────────────────────
+	r.section("MOUSE [" + app.name + "]")
+
+	// Move mouse into the browser window to confirm mouse input reaches it.
+	centerX, centerY := winX+info.W/2, winY+info.H/2
+	r.check("MouseMove to window centre", inp.MouseMove(centerX, centerY))
+	time.Sleep(100 * time.Millisecond)
+	r.check("MouseMove to top-left area", inp.MouseMove(winX+50, winY+50))
+	time.Sleep(100 * time.Millisecond)
+	r.pass("mouse movement sent")
+
+	// ── Navigation ───────────────────────────────────────────────────────────
+	// Ctrl+L focuses the address bar; typing the URL and pressing Return triggers
+	// navigation. about:support is a static info page — it always loads locally
+	// with no network dependency, making it safe for headless CI.
+	r.section("NAVIGATION [" + app.name + "]")
+
+	// Dismiss any modal dialog (e.g. Firefox session-restore / close-tabs prompt)
+	// that may have appeared before the browser is ready to receive keyboard input.
+	inp.KeyTap("escape") //nolint:errcheck
+	time.Sleep(300 * time.Millisecond)
+
+	inp.KeyDown("ctrl") //nolint:errcheck
+	inp.KeyTap("l")     //nolint:errcheck
+	inp.KeyUp("ctrl")   //nolint:errcheck
+	time.Sleep(300 * time.Millisecond)
+
+	r.check("type URL", inp.Type("about:support"))
+	time.Sleep(200 * time.Millisecond)
+	r.check("press Return", inp.KeyTap("return"))
+
+	// WaitForChange: screen must differ from the initial about:blank capture.
+	// This proves keyboard input reached Firefox and navigation began.
+	ctxChange, cancelChange := context.WithTimeout(context.Background(), 20*time.Second)
+	_, changeErr := find.WaitForChange(ctxChange, sc, winRect, hashBefore, 200*time.Millisecond, nil)
+	cancelChange()
+	if changeErr != nil {
+		r.fail("WaitForChange: browser did not change after navigation: %v", changeErr)
+	} else {
+		r.pass("WaitForChange: browser started rendering new page")
+	}
+
+	// WaitForNoChange: screen must stabilise after the page finishes loading.
+	// This proves the navigate-and-wait primitive works end-to-end.
+	ctxSettle, cancelSettle := context.WithTimeout(context.Background(), 30*time.Second)
+	stableHash, settleErr := find.WaitForNoChange(ctxSettle, sc, winRect, 5, 200*time.Millisecond, nil)
+	cancelSettle()
+	if settleErr != nil {
+		r.fail("WaitForNoChange: browser did not settle: %v", settleErr)
+	} else {
+		r.pass("WaitForNoChange: page settled at hash %08x", stableHash)
+	}
+
+	// Save a screenshot after navigation for visual confirmation.
+	fpath = fmt.Sprintf("/tmp/%s-firefox-after.png", pfx)
+	savePNG2(sc, winRect, fpath)
+	r.pass("screenshot after navigation -> %s", fpath)
+
+	// ── Find ─────────────────────────────────────────────────────────────────
+	// Test the find APIs against a settled browser window.
+	r.section("FIND [" + app.name + "]")
+
+	// WaitForChange timeout: the settled page must not change within 400 ms.
+	cornerRect := image.Rect(winX, winY, winX+100, winY+50)
+	hashCorner, _ := find.GrabHash(sc, cornerRect, nil)
+	ctxStatic, cancelStatic := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	_, timeoutErr := find.WaitForChange(ctxStatic, sc, cornerRect, hashCorner, 50*time.Millisecond, nil)
+	cancelStatic()
+	if timeoutErr != nil {
+		r.pass("WaitForChange timeout: settled region correctly returned error")
+	} else {
+		r.fail("WaitForChange timeout: settled region unexpectedly changed")
+	}
+
+	// WaitForNoChange: stable region must return within 5 samples.
+	ctxNC, cancelNC := context.WithTimeout(context.Background(), 5*time.Second)
+	_, ncErr := find.WaitForNoChange(ctxNC, sc, cornerRect, 3, 100*time.Millisecond, nil)
+	cancelNC()
+	if ncErr != nil {
+		r.fail("WaitForNoChange on stable region: %v", ncErr)
+	} else {
+		r.pass("WaitForNoChange: settled region confirmed stable")
+	}
+
+	// ScanFor: both regions should match their current hashes immediately.
+	hashWindow, _ := find.GrabHash(sc, winRect, nil)
+	ctxScan, cancelScan := context.WithTimeout(context.Background(), 3*time.Second)
+	scanResult, scanErr := find.ScanFor(ctxScan, sc,
+		[]image.Rectangle{cornerRect, winRect},
+		[]uint32{hashCorner, hashWindow},
+		100*time.Millisecond, nil)
+	cancelScan()
+	if scanErr != nil {
+		r.fail("ScanFor: %v", scanErr)
+	} else {
+		r.pass("ScanFor: matched rect %v (hash %d)", scanResult.Rect, scanResult.Hash)
+	}
+}
 
 func waitForWindow(wm window.Manager, substr string, timeout time.Duration) (window.Info, error) {
 	// GTK apps sometimes map the window before it's fully ready.

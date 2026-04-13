@@ -4,6 +4,8 @@
 default:
     @just --list
 
+# ── quality ────────────────────────────────────────────────────────────────────
+
 # Format all Go source
 fmt:
     go fmt ./...
@@ -24,7 +26,7 @@ tidy:
 # Generate CLI documentation
 docs:
     rm -rf docs-cli/
-    go run ./cmd/pf/ docs --dir ./docs-cli
+    go run ./cmd/pf/ docs --dir ./docs-cli --readme README.md
 
 # Full pre-commit workflow
 precommit: check tidy docs
@@ -33,19 +35,40 @@ precommit: check tidy docs
 build: precommit
     go build ./...
 
-# Run the live integration test against the current display (requires kwrite)
+# Build and install the pf CLI to $GOPATH/bin
+install: build
+    go install ./cmd/pf/
+
+# ── testing ────────────────────────────────────────────────────────────────────
+
+# Run the live integration test against the current display (requires kwrite, pluma, or firefox)
 integration:
     go run ./cmd/integration/
+
+# Run the full nested integration test suite (headless + visible Wayland + X11).
+# Launches 7 isolated sessions: x11-kwrite, x11-pluma, wlroots-wayland-kwrite,
+# wlroots-wayland-pluma, wlroots-wayland-firefox, wlroots-xwayland-kwrite,
+# wlroots-xwayland-pluma. Each session is started fresh and fully torn down.
+test-nested:
+    @bash scripts/test-nested.sh
+
+# Run integration suite on the primary desktop (no nested compositor).
+# Exercises KWinShot, KWinScriptManager, X11Backend, XTest — backends that
+# nested sessions never reach. Moves mouse and types on the real desktop.
+test-desktop:
+    @bash scripts/test-desktop.sh
+
+# ── dev environment ────────────────────────────────────────────────────────────
 
 # Run the pf CLI
 pf *args:
     go run ./cmd/pf/ {{args}}
 
-# Build and install the pf CLI to $GOPATH/bin
-install: build
-    go install ./cmd/pf/
+# Run the pf CLI inside the nested sway session
+nested-pf *args:
+    WAYLAND_DISPLAY="${SWAY_WAYLAND_DISPLAY:-wayland-1}" go run ./cmd/pf/ {{args}}
 
-# Launch a true isolated nested sway session (wlroots) for testing.
+# Launch a visible isolated nested sway session (wlroots) connected to the host desktop.
 # Creates a temporary XDG_RUNTIME_DIR so host processes do not leak into it.
 nested:
     #!/usr/bin/env bash
@@ -53,10 +76,7 @@ nested:
     HOST_XDG="$XDG_RUNTIME_DIR"
     HOST_WL="$WAYLAND_DISPLAY"
     MY_XDG=$(mktemp -d -t perfuncted-xdg-XXXXXX)
-    
-    # Symlink the generic wayland-1 socket (which sway will create) into our isolated dir
-    ln -sf "$HOST_XDG/wayland-1" "$MY_XDG/wayland-1"
-    
+
     export XDG_RUNTIME_DIR=$MY_XDG
     export WAYLAND_DISPLAY=wayland-1
     echo "============================================="
@@ -69,50 +89,33 @@ nested:
     echo ""
     echo "When done, tear down with: just cleanup-nested"
     echo "============================================="
-    
-    # Run sway in the background but explicitly pass the HOST environment 
-    # so it can connect to the primary compositor.
+
+    # Run sway natively inside the isolated XDG directory.
+    # We pass the absolute path to the host Wayland socket so it safely connects
+    # out to the outer desktop, while creating its own wayland-1 and sway-ipc
+    # strictly inside MY_XDG. This fixes Firefox sandboxing and IPC.
     WLR_BACKENDS=wayland WLR_RENDERER=pixman \
-    XDG_RUNTIME_DIR="$HOST_XDG" WAYLAND_DISPLAY="$HOST_WL" \
+    XDG_RUNTIME_DIR="$MY_XDG" WAYLAND_DISPLAY="$HOST_XDG/$HOST_WL" \
     sway --unsupported-gpu -c config/sway/nested.conf &
-nested-example:
-    WAYLAND_DISPLAY="${SWAY_WAYLAND_DISPLAY:-wayland-1}" go run ./cmd/integration/
 
-# Run the pf CLI inside the nested sway session.
-nested-pf *args:
-    WAYLAND_DISPLAY="${SWAY_WAYLAND_DISPLAY:-wayland-1}" go run ./cmd/pf/ {{args}}
-
-# Run the full nested integration test suite: Wayland → XWayland → X11.
-# Each session is started fresh and fully torn down before the next.
-# The script automatically cleans up stale processes before and after running.
-test-nested:
-    @bash scripts/test-nested.sh
+# ── maintenance ────────────────────────────────────────────────────────────────
 
 # Clean up stale nested session processes and sockets.
-# Run this manually if you need to clean up without running tests.
+# Run this manually if a session crashes without cleaning up after itself.
 cleanup-nested:
     @echo "Cleaning up stale nested session processes..."
-    -pkill -9 -f "dbus-daemon.*perfuncted-xdg" 2>/dev/null || true
-    -pkill -9 -f "gvfsd-fuse.*perfuncted-xdg" 2>/dev/null || true
-    -pkill -9 fusermount3 2>/dev/null || true
-    -pkill -9 sway 2>/dev/null || true
-    -pkill -9 swaybg 2>/dev/null || true
-    -pkill -9 openbox 2>/dev/null || true
-    -pkill -9 Xvfb 2>/dev/null || true
-    -pkill -9 kwrite 2>/dev/null || true
-    -pkill -9 pluma 2>/dev/null || true
+    @for f in /proc/[0-9]*/environ; do \
+        [ -r "$$f" ] || continue; \
+        tr '\0' '\n' < "$$f" 2>/dev/null | grep -q '^XDG_RUNTIME_DIR=/tmp/perfuncted-xdg-' || continue; \
+        pid=$${f%/environ}; pid=$${pid#/proc/}; \
+        kill -9 "$$pid" 2>/dev/null || true; \
+    done
     @sleep 1
     @echo "Cleaning up stale temp files and sockets..."
     -for dir in /tmp/perfuncted-xdg-*/gvfs; do [ -d "$$dir" ] && fusermount -u "$$dir" 2>/dev/null || true; done
     -rm -rf /tmp/perfuncted-xdg-* 2>/dev/null || true
-    -rm -f /tmp/.X11-unix/X[0-9]* 2>/dev/null || true
     -rm -f /tmp/perfuncted-logs/*.log /tmp/perfuncted-logs/*.res 2>/dev/null || true
     -rm -f /tmp/pf-test-*.png 2>/dev/null || true
     -rm -f /tmp/*-kwrite.txt /tmp/*-pluma.txt 2>/dev/null || true
+    -rm -f /tmp/*-firefox-before.png /tmp/*-firefox-after.png 2>/dev/null || true
     @echo "Cleanup complete."
-
-# Run integration suite on the primary desktop (no nested compositor).
-# Exercises KWinShot, KWinScriptManager, X11Backend, XTest — backends that
-# nested sessions never reach.  Moves mouse and types on the real desktop.
-test-desktop:
-    @bash scripts/test-desktop.sh
