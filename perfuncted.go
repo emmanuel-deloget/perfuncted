@@ -453,8 +453,8 @@ func (i InputBundle) DragAndDrop(x1, y1, x2, y2 int) error {
 	return i.MouseUp(1)
 }
 
-// ClickRectCenter moves to the center of rect and performs a left click.
-func (i InputBundle) ClickRectCenter(rect image.Rectangle) error {
+// ClickCenter moves to the center of rect and performs a left click.
+func (i InputBundle) ClickCenter(rect image.Rectangle) error {
 	if err := i.checkAvailable(); err != nil {
 		return err
 	}

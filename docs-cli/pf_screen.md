@@ -19,8 +19,9 @@ Screen capture operations
 ### SEE ALSO
 
 * [pf](pf.md)	 - perfuncted — screen automation CLI
-* [pf screen checksum](pf_screen_checksum.md)	 - Print the CRC32 pixel checksum of a screen region
 * [pf screen grab](pf_screen_grab.md)	 - Capture a screen region and save as PNG
+* [pf screen hash](pf_screen_hash.md)	 - Print the CRC32 pixel hash of a screen region
+* [pf screen last-pixel](pf_screen_last-pixel.md)	 - Print the RGB colour of the bottom-right pixel of a region
 * [pf screen pixel](pf_screen_pixel.md)	 - Print the RGB colour of a single pixel
 * [pf screen resolution](pf_screen_resolution.md)	 - Print the screen resolution
 

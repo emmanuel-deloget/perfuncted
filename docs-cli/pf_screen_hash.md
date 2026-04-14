@@ -1,15 +1,15 @@
-## pf find last-pixel
+## pf screen hash
 
-Print the RGB colour of the bottom-right pixel of a region
+Print the CRC32 pixel hash of a screen region
 
 ```
-pf find last-pixel [flags]
+pf screen hash [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help          help for last-pixel
+  -h, --help          help for hash
       --rect string   x0,y0,x1,y1 (default "0,0,100,100")
 ```
 
@@ -23,5 +23,5 @@ pf find last-pixel [flags]
 
 ### SEE ALSO
 
-* [pf find](pf_find.md)	 - Pixel scanning and wait utilities
+* [pf screen](pf_screen.md)	 - Screen capture operations
 

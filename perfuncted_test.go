@@ -236,11 +236,11 @@ func TestDragAndDrop(t *testing.T) {
 	}
 }
 
-func TestClickRectCenter(t *testing.T) {
+func TestClickCenter(t *testing.T) {
 	m := &mockInputter{}
 	inp := perfuncted.InputBundle{Inputter: m}
 	rect := image.Rect(10, 20, 110, 120) // center = (60, 70)
-	if err := inp.ClickRectCenter(rect); err != nil {
+	if err := inp.ClickCenter(rect); err != nil {
 		t.Fatal(err)
 	}
 	if len(m.calls) != 1 || m.calls[0] != "click" {
