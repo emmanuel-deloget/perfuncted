@@ -2,7 +2,6 @@ package screen
 
 import (
 	"image"
-	"image/color"
 )
 
 // decodeBGRA decodes raw BGRA pixel data (little-endian byte order) into an
@@ -14,17 +13,15 @@ import (
 func decodeBGRA(data []byte, w, h, stride int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for row := 0; row < h; row++ {
+		srcRow := data[row*stride : row*stride+w*4]
+		dstOff := row * img.Stride
+		dst := img.Pix[dstOff : dstOff+w*4]
 		for col := 0; col < w; col++ {
-			off := row*stride + col*4
-			if off+3 >= len(data) {
-				return img
-			}
-			img.SetRGBA(col, row, color.RGBA{
-				R: data[off+2],
-				G: data[off+1],
-				B: data[off],
-				A: 0xff,
-			})
+			s := col * 4
+			dst[s+0] = srcRow[s+2] // R ← B
+			dst[s+1] = srcRow[s+1] // G ← G
+			dst[s+2] = srcRow[s+0] // B ← R
+			dst[s+3] = 0xff        // A
 		}
 	}
 	return img
@@ -35,11 +32,18 @@ func decodeBGRA(data []byte, w, h, stride int) *image.RGBA {
 // source image are left as zero (transparent black).
 func cropRGBA(src *image.RGBA, rect image.Rectangle) *image.RGBA {
 	out := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
-	sb := src.Bounds()
-	for y := rect.Min.Y; y < rect.Max.Y && y < sb.Max.Y; y++ {
-		for x := rect.Min.X; x < rect.Max.X && x < sb.Max.X; x++ {
-			out.SetRGBA(x-rect.Min.X, y-rect.Min.Y, src.RGBAAt(x, y))
-		}
+	r := rect.Intersect(src.Bounds())
+	if r.Empty() {
+		return out
+	}
+	// dstX/dstY: top-left offset within out for the intersected region.
+	dstX := r.Min.X - rect.Min.X
+	dstY := r.Min.Y - rect.Min.Y
+	w4 := r.Dx() * 4
+	for y := 0; y < r.Dy(); y++ {
+		srcOff := (r.Min.Y+y-src.Rect.Min.Y)*src.Stride + (r.Min.X-src.Rect.Min.X)*4
+		dstOff := (dstY+y)*out.Stride + dstX*4
+		copy(out.Pix[dstOff:dstOff+w4], src.Pix[srcOff:srcOff+w4])
 	}
 	return out
 }

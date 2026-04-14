@@ -378,6 +378,26 @@ func FindColor(sc Screenshotter, rect image.Rectangle, target color.RGBA, tolera
 		return image.Point{}, fmt.Errorf("find: find-color grab: %w", err)
 	}
 	b := img.Bounds()
+
+	// Fast path: read directly from Pix for *image.RGBA, avoiding per-pixel
+	// At() calls and color model conversion.
+	if rgba, ok := img.(*image.RGBA); ok {
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			off := (y-rgba.Rect.Min.Y)*rgba.Stride + (b.Min.X-rgba.Rect.Min.X)*4
+			for x := b.Min.X; x < b.Max.X; x++ {
+				p := rgba.Pix[off : off+4]
+				if abs(int(p[0])-int(target.R)) <= tolerance &&
+					abs(int(p[1])-int(target.G)) <= tolerance &&
+					abs(int(p[2])-int(target.B)) <= tolerance {
+					return image.Pt(rect.Min.X+x-b.Min.X, rect.Min.Y+y-b.Min.Y), nil
+				}
+				off += 4
+			}
+		}
+		return image.Point{}, fmt.Errorf("find: colour #%02x%02x%02x not found (tolerance=%d)", target.R, target.G, target.B, tolerance)
+	}
+
+	// Slow path: generic image via At() + colour model conversion.
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
 			c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)

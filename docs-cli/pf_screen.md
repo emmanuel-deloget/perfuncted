@@ -23,4 +23,5 @@ Screen capture operations
 * [pf screen hash](pf_screen_hash.md)	 - Print the CRC32 pixel hash of a screen region
 * [pf screen pixel](pf_screen_pixel.md)	 - Print the RGB colour of a single pixel
 * [pf screen resolution](pf_screen_resolution.md)	 - Print the screen resolution
+* [pf screen watch](pf_screen_watch.md)	 - Continuously print hash changes in a screen region
 
