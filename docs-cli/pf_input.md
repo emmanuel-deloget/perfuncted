@@ -22,7 +22,7 @@ Mouse and keyboard injection
 * [pf input click](pf_input_click.md)	 - Click a mouse button at coordinates
 * [pf input click-center](pf_input_click-center.md)	 - Click the center of a rectangle
 * [pf input double-click](pf_input_double-click.md)	 - Double-click at coordinates
-* [pf input drag](pf_input_drag.md)	 - Drag from one coordinate to another (press, move, release)
+* [pf input drag-and-drop](pf_input_drag-and-drop.md)	 - Drag from one coordinate to another (press, move, release)
 * [pf input key](pf_input_key.md)	 - Send a key or key combination (e.g. ctrl+s, return, escape)
 * [pf input keydown](pf_input_keydown.md)	 - Press and hold a key
 * [pf input keyup](pf_input_keyup.md)	 - Release a held key

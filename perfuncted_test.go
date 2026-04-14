@@ -258,7 +258,7 @@ func TestPressComboNilInputter(t *testing.T) {
 
 // ── WindowBundle tests ────────────────────────────────────────────────────────
 
-func TestActivateByMatch(t *testing.T) {
+func TestActivateMatch(t *testing.T) {
 	mgr := &mockManager{
 		lists: [][]window.Info{{
 			{Title: "Firefox — Mozilla"},
@@ -266,7 +266,7 @@ func TestActivateByMatch(t *testing.T) {
 		}},
 	}
 	w := perfuncted.WindowBundle{Manager: mgr}
-	if err := w.ActivateBy("firefox"); err != nil {
+	if err := w.Activate("firefox"); err != nil {
 		t.Fatal(err)
 	}
 	if len(mgr.activated) != 1 || mgr.activated[0] != "Firefox — Mozilla" {
@@ -274,14 +274,14 @@ func TestActivateByMatch(t *testing.T) {
 	}
 }
 
-func TestActivateByNoMatch(t *testing.T) {
+func TestActivateNoMatch(t *testing.T) {
 	mgr := &mockManager{
 		lists: [][]window.Info{{
 			{Title: "Terminal"},
 		}},
 	}
 	w := perfuncted.WindowBundle{Manager: mgr}
-	err := w.ActivateBy("firefox")
+	err := w.Activate("firefox")
 	if err == nil {
 		t.Error("expected error for no match")
 	}

@@ -1,9 +1,9 @@
 ## pf window activate
 
-Bring a window to the foreground by title substring
+Bring a window to the foreground by title substring (case-insensitive)
 
 ```
-pf window activate <title> [flags]
+pf window activate <pattern> [flags]
 ```
 
 ### Options

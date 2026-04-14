@@ -19,8 +19,7 @@ Window management
 ### SEE ALSO
 
 * [pf](pf.md)	 - perfuncted — screen automation CLI
-* [pf window activate](pf_window_activate.md)	 - Bring a window to the foreground by title substring
-* [pf window activate-by](pf_window_activate-by.md)	 - Bring a window to the foreground by title substring (case-insensitive, library-guaranteed)
+* [pf window activate](pf_window_activate.md)	 - Bring a window to the foreground by title substring (case-insensitive)
 * [pf window active](pf_window_active.md)	 - Print the title of the currently focused window
 * [pf window close](pf_window_close.md)	 - Close a window by title
 * [pf window list](pf_window_list.md)	 - List all visible windows

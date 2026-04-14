@@ -1,15 +1,19 @@
-## pf window activate-by
+## pf input drag-and-drop
 
-Bring a window to the foreground by title substring (case-insensitive, library-guaranteed)
+Drag from one coordinate to another (press, move, release)
 
 ```
-pf window activate-by <pattern> [flags]
+pf input drag-and-drop [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for activate-by
+  -h, --help     help for drag-and-drop
+      --x1 int   start x
+      --x2 int   end x
+      --y1 int   start y
+      --y2 int   end y
 ```
 
 ### Options inherited from parent commands
@@ -22,5 +26,5 @@ pf window activate-by <pattern> [flags]
 
 ### SEE ALSO
 
-* [pf window](pf_window.md)	 - Window management
+* [pf input](pf_input.md)	 - Mouse and keyboard injection
 

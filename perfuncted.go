@@ -304,9 +304,9 @@ type WindowBundle struct {
 	window.Manager
 }
 
-// ActivateBy focuses the first window whose title contains pattern (case-insensitive).
+// Activate focuses the first window whose title contains pattern (case-insensitive).
 // Note: This operates on a "first match wins" basis.
-func (w WindowBundle) ActivateBy(pattern string) error {
+func (w WindowBundle) Activate(pattern string) error {
 	windows, err := w.Manager.List()
 	if err != nil {
 		return err
@@ -322,7 +322,7 @@ func (w WindowBundle) ActivateBy(pattern string) error {
 
 // FindByTitle returns the first window whose title contains pattern
 // (case-insensitive). Use this to inspect window geometry or title before
-// activating; ActivateBy discards the match result.
+// activating; Activate discards the match result.
 func (w WindowBundle) FindByTitle(pattern string) (window.Info, error) {
 	windows, err := w.Manager.List()
 	if err != nil {
