@@ -56,6 +56,18 @@ install: build
 race:
     go test -race ./...
 
+# Print per-function unit test coverage summary
+coverage:
+    go test -coverprofile=coverage.out ./...
+    go tool cover -func=coverage.out
+    @rm -f coverage.out
+
+# Open an HTML coverage report in the browser
+coverage-html:
+    go test -coverprofile=coverage.out ./...
+    go tool cover -html=coverage.out
+    @rm -f coverage.out
+
 # Run the live integration test against the current display (requires kwrite, pluma, or firefox)
 integration:
     go run ./cmd/integration/
