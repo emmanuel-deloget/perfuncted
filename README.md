@@ -20,12 +20,15 @@ img, _ := pf.Screen.Grab(image.Rect(0, 0, 1920, 1080))
 | Session | Screen capture | Input | Window management |
 |---|---|---|---|
 | X11 | XGetImage ✅ | XTEST / uinput ✅ | EWMH ✅ |
-| wlroots Wayland (Sway, Hyprland) | wlr-screencopy ✅ | wl-virtual / uinput ✅ | wlr-foreign-toplevel ✅ |
-| KDE Plasma Wayland | KWin.ScreenShot2 ✅ | wl-virtual / uinput ✅ | KWin D-Bus scripting ✅ |
-| GNOME Wayland | xdg-desktop-portal ⚠️ | uinput ✅ | ❌ |
+| wlroots Wayland (Sway, Hyprland) | wlr-screencopy ✅ | wl-virtual / uinput ✅ | Sway IPC / wlr-foreign-toplevel ✅ |
+| KDE Plasma Wayland | KWin.ScreenShot2 ✅ | uinput ✅ | KWin D-Bus scripting ✅ |
+| GNOME Wayland | xdg-desktop-portal ⚠️ | uinput ✅ | Shell.Eval ⚠️ |
 
-> **GNOME:** Screen capture works but shows a one-time consent dialog. Window
-> management is unavailable by design. For full automation, run inside a nested
+> **KDE:** wl-virtual input protocols are wlroots-only; KDE uses uinput.
+>
+> **GNOME:** Screen capture shows a one-time consent dialog. Window management
+> via `org.gnome.Shell.Eval` works but is disabled by default on GNOME 41+
+> (requires unsafe-mode). For full automation, run inside a nested
 > [sway](https://swaywm.org/) session.
 
 Run `pf info` to see exactly which backends are active on your system.
