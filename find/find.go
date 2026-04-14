@@ -4,6 +4,7 @@
 package find
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"hash"
@@ -249,6 +250,33 @@ func LocateExact(sc Screenshotter, searchArea image.Rectangle, reference image.I
 	// (which does rb.Dx() × rb.Dy() comparisons per position).
 	refFirst := color.RGBAModel.Convert(reference.At(rb.Min.X, rb.Min.Y)).(color.RGBA)
 
+	// Fast path: direct Pix access when both images are *image.RGBA.
+	srcRGBA, srcOk := src.(*image.RGBA)
+	refRGBA, refOk := reference.(*image.RGBA)
+	if srcOk && refOk {
+		// Read refFirst directly from Pix (avoids color model conversion in inner loop).
+		refOff0 := (rb.Min.Y-refRGBA.Rect.Min.Y)*refRGBA.Stride + (rb.Min.X-refRGBA.Rect.Min.X)*4
+		refFirst = color.RGBA{
+			R: refRGBA.Pix[refOff0],
+			G: refRGBA.Pix[refOff0+1],
+			B: refRGBA.Pix[refOff0+2],
+			A: refRGBA.Pix[refOff0+3],
+		}
+		for y := sb.Min.Y; y <= sb.Max.Y-rb.Dy(); y++ {
+			for x := sb.Min.X; x <= sb.Max.X-rb.Dx(); x++ {
+				srcOff := (y-srcRGBA.Rect.Min.Y)*srcRGBA.Stride + (x-srcRGBA.Rect.Min.X)*4
+				p := srcRGBA.Pix[srcOff : srcOff+4]
+				if p[0] != refFirst.R || p[1] != refFirst.G || p[2] != refFirst.B || p[3] != refFirst.A {
+					continue
+				}
+				if matchAt(src, reference, x, y) {
+					return image.Rect(x, y, x+rb.Dx(), y+rb.Dy()), nil
+				}
+			}
+		}
+		return image.Rectangle{}, fmt.Errorf("find: exact match not found")
+	}
+
 	for y := sb.Min.Y; y <= sb.Max.Y-rb.Dy(); y++ {
 		for x := sb.Min.X; x <= sb.Max.X-rb.Dx(); x++ {
 			if color.RGBAModel.Convert(src.At(x, y)).(color.RGBA) != refFirst {
@@ -264,6 +292,24 @@ func LocateExact(sc Screenshotter, searchArea image.Rectangle, reference image.I
 
 func matchAt(src, ref image.Image, ox, oy int) bool {
 	rb := ref.Bounds()
+
+	// Fast path: direct Pix row comparison for *image.RGBA images.
+	// Avoids per-pixel interface dispatch and color model conversion.
+	srcRGBA, srcOk := src.(*image.RGBA)
+	refRGBA, refOk := ref.(*image.RGBA)
+	if srcOk && refOk {
+		w4 := rb.Dx() * 4
+		for y := 0; y < rb.Dy(); y++ {
+			srcOff := (oy+y-srcRGBA.Rect.Min.Y)*srcRGBA.Stride + (ox-srcRGBA.Rect.Min.X)*4
+			refOff := (rb.Min.Y+y-refRGBA.Rect.Min.Y)*refRGBA.Stride + (rb.Min.X-refRGBA.Rect.Min.X)*4
+			if !bytes.Equal(srcRGBA.Pix[srcOff:srcOff+w4], refRGBA.Pix[refOff:refOff+w4]) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Slow path: generic image via At() + colour model conversion.
 	for y := 0; y < rb.Dy(); y++ {
 		for x := 0; x < rb.Dx(); x++ {
 			cSrc := color.RGBAModel.Convert(src.At(ox+x, oy+y)).(color.RGBA)
