@@ -49,19 +49,23 @@ type Options struct {
 	MaxX, MaxY int32
 
 	// Nested, when true, causes New() to auto-detect a nested perfuncted sway
-	// session in /tmp/perfuncted-xdg-* and switch the process environment to
-	// target that session instead of the host desktop.
+	// session in /tmp/perfuncted-xdg-* while opening backends against that
+	// session instead of the host desktop.
 	Nested bool
 
 	// XDGRuntimeDir, WaylandDisplay, and DBusSessionAddress allow callers to
-	// specify the session environment directly instead of relying on (or
-	// mutating) the process environment. When any of these are set, New()
-	// calls os.Setenv before opening backends. This is the preferred way to
-	// connect to a specific session — use it instead of calling os.Setenv
-	// manually.
+	// specify the session environment directly instead of relying on the
+	// process environment. This is the preferred way to connect to a specific
+	// session — use it instead of calling os.Setenv manually.
 	XDGRuntimeDir      string
 	WaylandDisplay     string
 	DBusSessionAddress string
+}
+
+type sessionEnv struct {
+	xdgRuntimeDir      string
+	waylandDisplay     string
+	dbusSessionAddress string
 }
 
 // NestedEnv scans /tmp/perfuncted-xdg-* directories created by `just nested` and
@@ -242,6 +246,20 @@ func (s ScreenBundle) GrabFullHash() (uint32, error) {
 		return 0, err
 	}
 	return s.GrabHash(image.Rect(0, 0, w, h))
+}
+
+// WaitForStable polls rect until its pixel hash is unchanged for stableN
+// consecutive samples, then returns the settled hash. Unlike WaitForVisibleChange,
+// it does not require an initial change to have occurred first — use it when the
+// UI is already mid-transition or to confirm it has finished settling from the
+// current state (e.g. after openConsole or Activate).
+//
+// stableN must be ≥ 1; a value of 5 at 200ms poll requires one second of stability.
+func (s ScreenBundle) WaitForStable(ctx context.Context, rect image.Rectangle, stableN int, poll time.Duration) (uint32, error) {
+	if err := s.checkAvailable(); err != nil {
+		return 0, err
+	}
+	return find.WaitForNoChange(ctx, s.Screenshotter, rect, stableN, poll, nil)
 }
 
 // WaitForVisibleChange grabs the initial state of rect, waits for it to change,
@@ -509,40 +527,108 @@ func (i InputBundle) PressCombo(combo string) error {
 	return nil
 }
 
+// ClipboardBundle wraps clipboard.Clipboard with a safe Get that won't hang.
+type ClipboardBundle struct {
+	clipboard.Clipboard
+}
+
+// Get reads the clipboard. The default clipboard backends enforce their own
+// command timeout so callers do not block indefinitely on hung tools.
+func (c ClipboardBundle) Get() (string, error) {
+	if c.Clipboard == nil {
+		return "", fmt.Errorf("clipboard: not available")
+	}
+	return c.Clipboard.Get()
+}
+
 // Perfuncted bundles auto-detected screen, input, window, and clipboard backends.
 type Perfuncted struct {
 	Screen    ScreenBundle
 	Input     InputBundle
 	Window    WindowBundle
-	Clipboard clipboard.Clipboard
+	Clipboard ClipboardBundle
+}
+
+func resolveSessionEnv(opts Options) (sessionEnv, error) {
+	env := sessionEnv{
+		xdgRuntimeDir:      opts.XDGRuntimeDir,
+		waylandDisplay:     opts.WaylandDisplay,
+		dbusSessionAddress: opts.DBusSessionAddress,
+	}
+	if opts.Nested {
+		xdg, wd, dbus, err := NestedEnv()
+		if err != nil {
+			return sessionEnv{}, fmt.Errorf("perfuncted: nested session: %w", err)
+		}
+		if env.xdgRuntimeDir == "" {
+			env.xdgRuntimeDir = xdg
+		}
+		if env.waylandDisplay == "" {
+			env.waylandDisplay = wd
+		}
+		if env.dbusSessionAddress == "" {
+			env.dbusSessionAddress = dbus
+		}
+	}
+	return env, nil
+}
+
+func applySessionEnv(env sessionEnv) func() {
+	const unset = "\x00"
+	prev := map[string]string{
+		"XDG_RUNTIME_DIR":          unset,
+		"WAYLAND_DISPLAY":          unset,
+		"DBUS_SESSION_BUS_ADDRESS": unset,
+	}
+	for k := range prev {
+		if v, ok := os.LookupEnv(k); ok {
+			prev[k] = v
+		}
+	}
+	if env.xdgRuntimeDir != "" {
+		_ = os.Setenv("XDG_RUNTIME_DIR", env.xdgRuntimeDir)
+	}
+	if env.waylandDisplay != "" {
+		_ = os.Setenv("WAYLAND_DISPLAY", env.waylandDisplay)
+	}
+	if env.dbusSessionAddress != "" {
+		_ = os.Setenv("DBUS_SESSION_BUS_ADDRESS", env.dbusSessionAddress)
+	}
+	return func() {
+		for k, v := range prev {
+			if v == unset {
+				_ = os.Unsetenv(k)
+				continue
+			}
+			_ = os.Setenv(k, v)
+		}
+	}
 }
 
 // New opens all backends using auto-detection. Each backend is attempted
 // independently; an error from one does not prevent the others from opening.
 // Returns an error only when no backend could be opened at all.
 //
-// When opts.Nested is true, New() auto-detects a perfuncted nested sway session
-// in /tmp/perfuncted-xdg-* and switches the process environment to target it.
+// When opts.Nested or explicit session values are provided, New() temporarily
+// targets that session while the backends are opened, then restores the
+// process environment before returning.
 func New(opts Options) (*Perfuncted, error) {
-	if opts.Nested {
-		xdg, wd, dbus, err := NestedEnv()
-		if err != nil {
-			return nil, fmt.Errorf("perfuncted: nested session: %w", err)
-		}
-		os.Setenv("XDG_RUNTIME_DIR", xdg)
-		os.Setenv("WAYLAND_DISPLAY", wd)
-		os.Setenv("DBUS_SESSION_BUS_ADDRESS", dbus)
+	env, err := resolveSessionEnv(opts)
+	if err != nil {
+		return nil, err
 	}
+	restoreEnv := applySessionEnv(env)
+	defer restoreEnv()
 
 	// Apply explicit session environment if provided.
-	if opts.XDGRuntimeDir != "" {
-		os.Setenv("XDG_RUNTIME_DIR", opts.XDGRuntimeDir)
+	if env.xdgRuntimeDir != "" {
+		opts.XDGRuntimeDir = env.xdgRuntimeDir
 	}
-	if opts.WaylandDisplay != "" {
-		os.Setenv("WAYLAND_DISPLAY", opts.WaylandDisplay)
+	if env.waylandDisplay != "" {
+		opts.WaylandDisplay = env.waylandDisplay
 	}
-	if opts.DBusSessionAddress != "" {
-		os.Setenv("DBUS_SESSION_BUS_ADDRESS", opts.DBusSessionAddress)
+	if env.dbusSessionAddress != "" {
+		opts.DBusSessionAddress = env.dbusSessionAddress
 	}
 
 	pf := &Perfuncted{}
@@ -580,7 +666,7 @@ func New(opts Options) (*Perfuncted, error) {
 	if err != nil {
 		errs = append(errs, fmt.Errorf("clipboard: %w", err))
 	} else {
-		pf.Clipboard = cb
+		pf.Clipboard = ClipboardBundle{Clipboard: cb}
 	}
 
 	if pf.Screen.Screenshotter == nil && pf.Input.Inputter == nil && pf.Window.Manager == nil {
@@ -607,7 +693,7 @@ func (pf *Perfuncted) Close() error {
 			errs = append(errs, err)
 		}
 	}
-	if pf.Clipboard != nil {
+	if pf.Clipboard.Clipboard != nil {
 		if err := pf.Clipboard.Close(); err != nil {
 			errs = append(errs, err)
 		}

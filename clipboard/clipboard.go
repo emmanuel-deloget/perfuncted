@@ -5,11 +5,15 @@ package clipboard
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+const commandTimeout = 5 * time.Second
 
 // Clipboard reads and writes the system clipboard.
 type Clipboard interface {
@@ -25,26 +29,32 @@ type Clipboard interface {
 // On Wayland sessions (WAYLAND_DISPLAY set) it uses wl-copy/wl-paste.
 // On X11 sessions it uses xclip.
 func Open() (Clipboard, error) {
+	env := append([]string(nil), os.Environ()...)
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		if _, err := exec.LookPath("wl-copy"); err == nil {
 			if _, err := exec.LookPath("wl-paste"); err == nil {
-				return &waylandClipboard{}, nil
+				return &waylandClipboard{env: env}, nil
 			}
 		}
 	}
 	if os.Getenv("DISPLAY") != "" {
 		if _, err := exec.LookPath("xclip"); err == nil {
-			return &x11Clipboard{}, nil
+			return &x11Clipboard{env: env}, nil
 		}
 	}
 	return nil, fmt.Errorf("clipboard: no clipboard tool available (install wl-clipboard or xclip)")
 }
 
 // waylandClipboard uses wl-copy/wl-paste for Wayland sessions.
-type waylandClipboard struct{}
+type waylandClipboard struct {
+	env []string
+}
 
 func (c *waylandClipboard) Get() (string, error) {
-	cmd := exec.Command("wl-paste", "--no-newline")
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "wl-paste", "--no-newline")
+	cmd.Env = c.env
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = nil
@@ -55,7 +65,10 @@ func (c *waylandClipboard) Get() (string, error) {
 }
 
 func (c *waylandClipboard) Set(text string) error {
-	cmd := exec.Command("wl-copy")
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "wl-copy")
+	cmd.Env = c.env
 	cmd.Stdin = strings.NewReader(text)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("clipboard: wl-copy: %w", err)
@@ -66,10 +79,15 @@ func (c *waylandClipboard) Set(text string) error {
 func (c *waylandClipboard) Close() error { return nil }
 
 // x11Clipboard uses xclip for X11 sessions.
-type x11Clipboard struct{}
+type x11Clipboard struct {
+	env []string
+}
 
 func (c *x11Clipboard) Get() (string, error) {
-	cmd := exec.Command("xclip", "-selection", "clipboard", "-o")
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-o")
+	cmd.Env = c.env
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = nil
@@ -80,7 +98,10 @@ func (c *x11Clipboard) Get() (string, error) {
 }
 
 func (c *x11Clipboard) Set(text string) error {
-	cmd := exec.Command("xclip", "-selection", "clipboard")
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "xclip", "-selection", "clipboard")
+	cmd.Env = c.env
 	cmd.Stdin = strings.NewReader(text)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("clipboard: xclip: %w", err)

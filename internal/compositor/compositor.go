@@ -153,6 +153,7 @@ func kwinOnBus() bool {
 	if err != nil {
 		return false
 	}
+	defer conn.Close()
 	var names []string
 	if err := conn.BusObject().Call("org.freedesktop.DBus.ListNames", 0).Store(&names); err != nil {
 		return false

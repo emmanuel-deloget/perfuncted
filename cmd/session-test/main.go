@@ -112,7 +112,7 @@ func main() {
 	}
 
 	// 7. Clipboard round-trip.
-	if pf != nil && pf.Clipboard != nil {
+	if pf != nil && pf.Clipboard.Clipboard != nil {
 		marker := "session-test-clip"
 		if err := pf.Clipboard.Set(marker); err != nil {
 			fail("Clipboard.Set: %v", err)

@@ -167,6 +167,7 @@ func checkPortalDbus() probe.Result {
 		r.Reason = "D-Bus session unavailable"
 		return r
 	}
+	defer conn.Close()
 	if dbusutil.HasService(conn, "org.freedesktop.portal.Desktop") {
 		r.Available = true
 		r.Reason = "org.freedesktop.portal.Desktop on session bus"

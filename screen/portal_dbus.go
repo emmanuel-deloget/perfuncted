@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"image"
 	"image/png"
-	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +30,40 @@ const (
 	portalSsIf  = "org.freedesktop.portal.Screenshot"
 	portalReqIf = "org.freedesktop.portal.Request"
 )
+
+func fileURIPath(fileURI string) (string, error) {
+	const prefix = "file://"
+	if !strings.HasPrefix(fileURI, prefix) {
+		return "", fmt.Errorf("unsupported URI scheme")
+	}
+	path := strings.TrimPrefix(fileURI, prefix)
+	switch {
+	case strings.HasPrefix(path, "/"):
+	case strings.HasPrefix(path, "localhost/"):
+		path = "/" + strings.TrimPrefix(path, "localhost/")
+	default:
+		return "", fmt.Errorf("unsupported file URI host")
+	}
+
+	var b strings.Builder
+	b.Grow(len(path))
+	for i := 0; i < len(path); i++ {
+		if path[i] != '%' {
+			b.WriteByte(path[i])
+			continue
+		}
+		if i+2 >= len(path) {
+			return "", fmt.Errorf("truncated escape")
+		}
+		v, err := strconv.ParseUint(path[i+1:i+3], 16, 8)
+		if err != nil {
+			return "", fmt.Errorf("invalid escape %q", path[i:i+3])
+		}
+		b.WriteByte(byte(v))
+		i += 2
+	}
+	return b.String(), nil
+}
 
 // NewPortalDBusBackend verifies that the xdg-desktop-portal Screenshot
 // interface is reachable on the session bus.
@@ -99,17 +133,17 @@ func (b *PortalDBusBackend) Grab(rect image.Rectangle) (image.Image, error) {
 				return nil, fmt.Errorf("screen/portal: no URI in response")
 			}
 			fileURI, _ := uriVar.Value().(string)
-			u, err := url.Parse(fileURI)
+			path, err := fileURIPath(fileURI)
 			if err != nil {
 				return nil, fmt.Errorf("screen/portal: parse URI %q: %w", fileURI, err)
 			}
-			f, err := os.Open(u.Path)
+			f, err := os.Open(path)
 			if err != nil {
-				return nil, fmt.Errorf("screen/portal: open %s: %w", u.Path, err)
+				return nil, fmt.Errorf("screen/portal: open %s: %w", path, err)
 			}
 			img, err := png.Decode(f)
 			f.Close()
-			os.Remove(u.Path) //nolint:errcheck
+			os.Remove(path) //nolint:errcheck
 			if err != nil {
 				return nil, fmt.Errorf("screen/portal: decode PNG: %w", err)
 			}

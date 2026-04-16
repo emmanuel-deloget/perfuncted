@@ -685,7 +685,7 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	}
 
 	// Clipboard round-trip
-	if pf.Clipboard != nil {
+	if pf.Clipboard.Clipboard != nil {
 		marker := fmt.Sprintf("perfuncted-clip-%d", time.Now().UnixNano())
 		if err := pf.Clipboard.Set(marker); err != nil {
 			r.fail("Clipboard Set: %v", err)

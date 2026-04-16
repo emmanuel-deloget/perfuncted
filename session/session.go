@@ -16,13 +16,16 @@
 package session
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"image"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -53,12 +56,16 @@ type Session struct {
 	swayPid    int
 	dbusPid    int
 	wlPastePid int
+	swayCmd    *exec.Cmd
+	dbusCmd    *exec.Cmd
+	wlPasteCmd *exec.Cmd
 	logDir     string
 	stopped    bool
 }
 
 // Start creates a new isolated headless sway session. It launches dbus-daemon,
-// headless sway, and wl-paste, then waits for the Wayland socket to appear.
+// headless sway, and wl-paste, then waits for the Wayland and sway IPC sockets
+// to appear.
 func Start(cfg Config) (*Session, error) {
 	if cfg.Resolution == (image.Point{}) {
 		cfg.Resolution = image.Pt(1024, 768)
@@ -154,6 +161,37 @@ func (s *Session) WaylandDisplay() string { return s.wlDisplay }
 // DBusAddress returns the D-Bus session bus address.
 func (s *Session) DBusAddress() string { return s.dbusAddr }
 
+// CleanupOnSignal stops the session when ctx is cancelled or when the process
+// receives an interrupt/termination signal. It returns a function that
+// unregisters the handler without stopping the session.
+//
+// SIGKILL and hard crashes cannot be handled in-process; callers should still
+// keep an external cleanup path for those cases.
+func (s *Session) CleanupOnSignal(ctx context.Context) func() {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+	stopCh := make(chan struct{})
+	go func() {
+		defer signal.Stop(sigs)
+		select {
+		case <-ctx.Done():
+			s.Stop()
+		case <-sigs:
+			s.Stop()
+		case <-stopCh:
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(stopCh)
+		})
+	}
+}
+
 // Stop tears down the session in reverse order: wl-paste, sway, dbus,
 // then removes the temporary XDG directory.
 func (s *Session) Stop() {
@@ -162,18 +200,9 @@ func (s *Session) Stop() {
 	}
 	s.stopped = true
 
-	if s.wlPastePid > 0 {
-		syscall.Kill(-s.wlPastePid, syscall.SIGTERM)
-		time.Sleep(200 * time.Millisecond)
-	}
-	if s.swayPid > 0 {
-		syscall.Kill(-s.swayPid, syscall.SIGTERM)
-		time.Sleep(500 * time.Millisecond)
-	}
-	if s.dbusPid > 0 {
-		syscall.Kill(-s.dbusPid, syscall.SIGTERM)
-		time.Sleep(200 * time.Millisecond)
-	}
+	s.stopManagedProcess(s.wlPasteCmd, s.wlPastePid, 200*time.Millisecond)
+	s.stopManagedProcess(s.swayCmd, s.swayPid, 500*time.Millisecond)
+	s.stopManagedProcess(s.dbusCmd, s.dbusPid, 200*time.Millisecond)
 	if s.xdgDir != "" {
 		os.RemoveAll(s.xdgDir)
 	}
@@ -215,6 +244,7 @@ func (s *Session) launchDBus() error {
 		return err
 	}
 	s.dbusPid = cmd.Process.Pid
+	s.dbusCmd = cmd
 
 	// Wait for dbus socket to appear.
 	busPath := filepath.Join(s.xdgDir, "bus")
@@ -250,17 +280,33 @@ func (s *Session) launchSway(confPath string) error {
 		return err
 	}
 	s.swayPid = cmd.Process.Pid
+	s.swayCmd = cmd
 	logFile.Close()
 
 	// Wait for wayland socket.
 	socketPath := filepath.Join(s.xdgDir, s.wlDisplay)
 	for i := 0; i < 150; i++ {
 		if _, err := os.Stat(socketPath); err == nil {
-			return nil
+			break
+		}
+		if i == 149 {
+			return fmt.Errorf("wayland socket %s did not appear within 30s", socketPath)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("wayland socket %s did not appear within 30s", socketPath)
+
+	// Wait for sway IPC socket as well so callers depending on window control
+	// don't race browser startup against compositor readiness.
+	for i := 0; i < 150; i++ {
+		if matches, err := filepath.Glob(filepath.Join(s.xdgDir, "sway-ipc.*.sock")); err == nil && len(matches) > 0 {
+			return nil
+		}
+		if i == 149 {
+			return fmt.Errorf("sway IPC socket in %s did not appear within 30s", s.xdgDir)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return nil
 }
 
 func (s *Session) launchWlPaste() {
@@ -273,6 +319,47 @@ func (s *Session) launchWlPaste() {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err == nil {
 		s.wlPastePid = cmd.Process.Pid
+		s.wlPasteCmd = cmd
+	}
+}
+
+func (s *Session) stopManagedProcess(cmd *exec.Cmd, pid int, waitTimeout time.Duration) {
+	if pid <= 0 {
+		return
+	}
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
+		return
+	}
+	if cmd == nil {
+		time.Sleep(waitTimeout)
+		return
+	}
+	if waitForProcess(pid, waitTimeout) {
+		return
+	}
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+		return
+	}
+	_ = waitForProcess(pid, waitTimeout)
+}
+
+func waitForProcess(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		var status syscall.WaitStatus
+		waited, err := syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
+		switch {
+		case err == nil && waited == pid:
+			return true
+		case err == syscall.ECHILD:
+			return true
+		case err == syscall.EINTR:
+			continue
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 

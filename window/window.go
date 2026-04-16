@@ -114,6 +114,7 @@ func checkKWinScript(kind compositor.Session) probe.Result {
 		r.Reason = fmt.Sprintf("D-Bus unavailable: %v", err)
 		return r
 	}
+	defer conn.Close()
 	var intro string
 	obj := conn.Object("org.kde.KWin", "/Scripting")
 	if err := obj.Call("org.freedesktop.DBus.Introspectable.Introspect", 0).Store(&intro); err != nil {

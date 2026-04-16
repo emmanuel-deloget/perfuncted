@@ -1,10 +1,15 @@
 package session
 
 import (
+	"context"
 	"image"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestEnviron(t *testing.T) {
@@ -98,4 +103,58 @@ func TestEmbeddedConfigs(t *testing.T) {
 	if len(data) == 0 {
 		t.Fatal("embedded headless.conf is empty")
 	}
+}
+
+func TestStopManagedProcessReapsChild(t *testing.T) {
+	s := &Session{}
+	cmd := helperCommand(t)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+	s.stopManagedProcess(cmd, cmd.Process.Pid, 500*time.Millisecond)
+	if err := syscall.Kill(cmd.Process.Pid, 0); err != syscall.ESRCH {
+		t.Fatalf("expected process to be gone, got %v", err)
+	}
+}
+
+func helperCommand(t *testing.T) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
+}
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	for {
+		time.Sleep(10 * time.Second)
+	}
+}
+
+func TestCleanupOnSignalStopsOnContextCancel(t *testing.T) {
+	xdgDir := filepath.Join(t.TempDir(), "xdg")
+	if err := os.MkdirAll(xdgDir, 0700); err != nil {
+		t.Fatalf("mkdir xdg: %v", err)
+	}
+	s := &Session{xdgDir: xdgDir}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	unregister := s.CleanupOnSignal(ctx)
+	defer unregister()
+	cancel()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.stopped {
+			if _, err := os.Stat(xdgDir); os.IsNotExist(err) {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("session was not stopped on context cancellation")
 }
