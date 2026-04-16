@@ -60,6 +60,7 @@ type Session struct {
 	dbusCmd    *exec.Cmd
 	wlPasteCmd *exec.Cmd
 	logDir     string
+	mu         sync.Mutex
 	stopped    bool
 }
 
@@ -195,10 +196,13 @@ func (s *Session) CleanupOnSignal(ctx context.Context) func() {
 // Stop tears down the session in reverse order: wl-paste, sway, dbus,
 // then removes the temporary XDG directory.
 func (s *Session) Stop() {
+	s.mu.Lock()
 	if s.stopped {
+		s.mu.Unlock()
 		return
 	}
 	s.stopped = true
+	s.mu.Unlock()
 
 	s.stopManagedProcess(s.wlPasteCmd, s.wlPastePid, 200*time.Millisecond)
 	s.stopManagedProcess(s.swayCmd, s.swayPid, 500*time.Millisecond)
@@ -206,6 +210,13 @@ func (s *Session) Stop() {
 	if s.xdgDir != "" {
 		os.RemoveAll(s.xdgDir)
 	}
+}
+
+// IsStopped returns true if Stop has been called.
+func (s *Session) IsStopped() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopped
 }
 
 // Environ builds a complete environment variable slice by overlaying session

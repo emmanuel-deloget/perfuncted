@@ -149,7 +149,7 @@ func TestCleanupOnSignalStopsOnContextCancel(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if s.stopped {
+		if s.IsStopped() {
 			if _, err := os.Stat(xdgDir); os.IsNotExist(err) {
 				return
 			}
