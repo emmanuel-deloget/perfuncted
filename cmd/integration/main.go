@@ -174,6 +174,7 @@ func main() {
 			}
 			fpath := fmt.Sprintf("/tmp/%s-screen.png", pfx)
 			savePNG(full, fpath)
+			defer os.Remove(fpath)
 			r.pass("full screenshot -> %s", fpath)
 		}
 	}
@@ -253,6 +254,7 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 		r.fail("pre-create %s: %v", app.saveFile, err)
 		return
 	}
+	defer os.Remove(app.saveFile)
 	// Append the file path so the app opens it on launch.
 	launchCmd := append(app.launch, app.saveFile)
 	proc := executil.CommandContext(context.Background(), launchCmd[0], launchCmd[1:]...)
@@ -298,11 +300,42 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	r.section("MOUSE [" + app.name + "]")
 
 	winX, winY := info.X, info.Y
-	winRect := image.Rect(winX, winY, winX+info.W, winY+info.H)
+	screenRect := image.Rect(0, 0, 1024, 768)
+	if w, h, err := pf.Screen.Resolution(); err == nil && w > 0 && h > 0 {
+		screenRect = image.Rect(0, 0, w, h)
+	}
+	if winX < screenRect.Min.X {
+		winX = screenRect.Min.X
+	} else if winX >= screenRect.Max.X {
+		winX = screenRect.Max.X - 1
+	}
+	if winY < screenRect.Min.Y {
+		winY = screenRect.Min.Y
+	} else if winY >= screenRect.Max.Y {
+		winY = screenRect.Max.Y - 1
+	}
+	if info.W <= 0 {
+		info.W = screenRect.Max.X - winX
+	}
+	if info.H <= 0 {
+		info.H = screenRect.Max.Y - winY
+	}
+	winRect := image.Rect(winX, winY, winX+info.W, winY+info.H).Intersect(screenRect)
+	if winRect.Empty() {
+		winRect = screenRect
+	}
+	winX, winY = winRect.Min.X, winRect.Min.Y
+	info.W, info.H = winRect.Dx(), winRect.Dy()
 	r.pass("window origin: %d,%d (W=%d H=%d)", winX, winY, info.W, info.H)
 
-	menuBarRect := image.Rect(winX, winY+22, winX+300, winY+50)
-	menuDropRect := image.Rect(winX, winY+50, winX+200, winY+200)
+	menuBarRect := image.Rect(winX, winY+22, winX+300, winY+50).Intersect(winRect)
+	if menuBarRect.Empty() {
+		menuBarRect = winRect
+	}
+	menuDropRect := image.Rect(winX, winY+50, winX+200, winY+200).Intersect(winRect)
+	if menuDropRect.Empty() {
+		menuDropRect = winRect
+	}
 	hashBefore, err := find.GrabHash(sc, menuBarRect, nil)
 	r.check("grab menu bar before click", err)
 	hashMenuDropBefore, err := find.GrabHash(sc, menuDropRect, nil)
@@ -313,23 +346,40 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 		r.fail("window not active before MouseMove: %v", err)
 		return
 	}
-	// Pixel-based pointer verification: sample a small rect at the target
-	// coordinate before and after the move to ensure the compositor actually
-	// rendered a hover/focus visual change at the pointer location.
-	ptRect := image.Rect(fileMenuX, fileMenuY, fileMenuX+8, fileMenuY+8)
-	ptBefore, ptErr := find.GrabHash(sc, ptRect, nil)
-	r.check("grab pointer region before hover", ptErr)
 	if !(fileMenuX >= winRect.Min.X && fileMenuX < winRect.Max.X && fileMenuY >= winRect.Min.Y && fileMenuY < winRect.Max.Y) {
 		r.fail("target File menu coordinate %d,%d is outside window %v", fileMenuX, fileMenuY, winRect)
 		return
 	}
+	// Pixel-based pointer verification: sample a small rect at the target
+	// coordinate before and after the move to ensure the compositor actually
+	// rendered a hover/focus visual change at the pointer location.
+	ptRect := image.Rect(fileMenuX, fileMenuY, fileMenuX+8, fileMenuY+8).Intersect(winRect)
+	if ptRect.Empty() {
+		ptRect = winRect
+	}
+	ptBefore, ptErr := find.GrabHash(sc, ptRect, nil)
+	r.check("grab pointer region before hover", ptErr)
 	r.check("MouseMove to File menu", inp.MouseMove(fileMenuX, fileMenuY))
-	time.Sleep(200 * time.Millisecond)
 
-	hashHover, err := find.GrabHash(sc, menuBarRect, nil)
-	r.check("grab menu bar after hover", err)
-	ptAfter, ptErr2 := find.GrabHash(sc, ptRect, nil)
+	// Wait for the pointer region to change (indicates hover/focus)
+	ctxHover, cancelHover := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelHover()
+	ptAfter, ptErr2 := find.WaitForChange(ctxHover, sc, ptRect, ptBefore, 100*time.Millisecond, nil)
+	if ptErr2 != nil {
+		// fallback: capture current pointer region if WaitForChange timed out or failed
+		ptAfter, ptErr2 = find.GrabHash(sc, ptRect, nil)
+	}
 	r.check("grab pointer region after hover", ptErr2)
+
+	// Wait for menu bar to change if necessary (short timeout). If it doesn't change, capture current state.
+	ctxMenu, cancelMenu := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancelMenu()
+	hashHover, err := find.WaitForChange(ctxMenu, sc, menuBarRect, hashBefore, 100*time.Millisecond, nil)
+	if err != nil {
+		hashHover, err = find.GrabHash(sc, menuBarRect, nil)
+	}
+	r.check("grab menu bar after hover", err)
+
 	if ptErr == nil && ptErr2 == nil {
 		if ptBefore == ptAfter {
 			r.fail("pointer region did not change after MouseMove")
@@ -350,9 +400,15 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 		return
 	}
 	r.check("MouseClick File menu", inp.MouseClick(fileMenuX, fileMenuY, 1))
-	time.Sleep(400 * time.Millisecond)
 
-	hashAfterClick, err := find.GrabHash(sc, menuDropRect, nil)
+	// Wait for the menu dropdown area to visually change, indicating the menu has appeared.
+	ctxMenuOpen, cancelMenuOpen := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelMenuOpen()
+	hashAfterClick, err := find.WaitForChange(ctxMenuOpen, sc, menuDropRect, hashMenuDropBefore, 100*time.Millisecond, nil)
+	if err != nil {
+		// fallback: capture current state for diagnostics
+		hashAfterClick, err = find.GrabHash(sc, menuDropRect, nil)
+	}
 	r.check("grab menu after click", err)
 	if err == nil {
 		if hashAfterClick != hashMenuDropBefore {
@@ -362,11 +418,24 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 		}
 		fpath := fmt.Sprintf("/tmp/%s-menu-%s.png", pfx, app.name)
 		savePNG2(sc, menuDropRect, fpath)
+		defer os.Remove(fpath)
 		r.pass("menu region -> %s", fpath)
 	}
 
 	inp.KeyTap("escape") //nolint:errcheck
-	time.Sleep(200 * time.Millisecond)
+	// Wait briefly for the menu to close (if it was open). Use a captured
+	// menu hash if available; otherwise wait for the region to stabilise after
+	// sending Escape to avoid spurious immediate returns when hash is unknown.
+	ctxClose, cancelClose := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelClose()
+	if err == nil {
+		// We captured hashAfterClick successfully: wait for the region to change
+		// (menu closing) relative to that hash.
+		_, _ = find.WaitForChange(ctxClose, sc, menuDropRect, hashAfterClick, 100*time.Millisecond, nil)
+	} else {
+		// Fallback: wait for the menu region to settle (stable/no-change) after Escape.
+		_, _ = find.WaitForNoChange(ctxClose, sc, menuDropRect, 3, 100*time.Millisecond, nil)
+	}
 
 	// Right-click in the editor area — context menu should appear (button 3).
 	rcX, rcY := winX+400, winY+300
@@ -407,7 +476,6 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	} else {
 		r.pass("context menu closed after Escape")
 	}
-	time.Sleep(100 * time.Millisecond)
 
 	// ── Input Device ─────────────────────────────────────────────────────────
 	// Tests Mousedown and Mouseup as independent events (vs. the combined
@@ -416,28 +484,53 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	r.section("INPUT DEVICE [" + app.name + "]")
 
 	// Move to a safe editor area.
-	inp.MouseMove(winX+400, winY+300) //nolint:errcheck
-	time.Sleep(100 * time.Millisecond)
+	moveX, moveY := winX+400, winY+300
+	ptMoveRect := image.Rect(moveX, moveY, moveX+8, moveY+8)
+	ptMoveBefore, ptMoveErr := find.GrabHash(sc, ptMoveRect, nil)
+	r.check("grab pointer region before move", ptMoveErr)
+	r.check("MouseMove to safe editor area", inp.MouseMove(moveX, moveY))
+
+	ctxMove, cancelMove := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelMove()
+	ptMoveAfter, ptMoveErr2 := find.WaitForChange(ctxMove, sc, ptMoveRect, ptMoveBefore, 100*time.Millisecond, nil)
+	if ptMoveErr2 != nil {
+		ptMoveAfter, ptMoveErr2 = find.GrabHash(sc, ptMoveRect, nil)
+	}
+	r.check("grab pointer region after move", ptMoveErr2)
+	if ptMoveErr == nil && ptMoveErr2 == nil {
+		if ptMoveBefore == ptMoveAfter {
+			r.fail("pointer region did not change after MouseMove")
+		} else {
+			r.pass("pointer region changed after MouseMove")
+		}
+	}
 
 	// Mousedown + Mouseup: one full click via the explicit press/release path.
 	r.check("Mousedown button 1", inp.MouseDown(1))
-	time.Sleep(50 * time.Millisecond)
 	r.check("Mouseup button 1", inp.MouseUp(1))
-	time.Sleep(200 * time.Millisecond)
 
 	// Verify the click registered focus by typing a sentinel character and
 	// confirming the editor content changes, then undoing it.
 	editorScrollRect := image.Rect(winX+10, winY+60, winX+600, winY+400)
 	hashPreSentinel, _ := find.GrabHash(sc, editorScrollRect, nil)
-	inp.Type("~") //nolint:errcheck
-	time.Sleep(200 * time.Millisecond)
-	hashPostSentinel, _ := find.GrabHash(sc, editorScrollRect, nil)
-	pf.Input.PressCombo("ctrl+z") //nolint:errcheck
-	time.Sleep(100 * time.Millisecond)
-	if hashPostSentinel != hashPreSentinel {
-		r.pass("Mousedown/Mouseup: click registered (sentinel character appeared in editor)")
+	r.check("Type sentinel", inp.Type("~")) //nolint:errcheck
+
+	ctxSent, cancelSent := context.WithTimeout(context.Background(), 5*time.Second)
+	hashPostSentinel, sentErr := find.WaitForChange(ctxSent, sc, editorScrollRect, hashPreSentinel, 100*time.Millisecond, nil)
+	cancelSent()
+	if sentErr != nil {
+		r.fail("Sentinel char did not appear in editor: %v", sentErr)
 	} else {
-		r.fail("Mousedown/Mouseup: click did not register (editor content unchanged after typing)")
+		// Undo the change
+		pf.Input.PressCombo("ctrl+z") //nolint:errcheck
+		ctxUndo, cancelUndo := context.WithTimeout(context.Background(), 5*time.Second)
+		_, undoErr := find.WaitForChange(ctxUndo, sc, editorScrollRect, hashPostSentinel, 100*time.Millisecond, nil)
+		cancelUndo()
+		if undoErr != nil {
+			r.fail("Undo did not change editor after ctrl+z: %v", undoErr)
+		} else {
+			r.pass("Mousedown/Mouseup: click registered (sentinel appeared and undone)")
+		}
 	}
 
 	// ── Text input ───────────────────────────────────────────────────────────
@@ -453,11 +546,17 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	ptEditorRect := image.Rect(editorX, editorY, editorX+8, editorY+8)
 	ptEditorBefore, ptErr := find.GrabHash(sc, ptEditorRect, nil)
 	r.check("grab editor pointer region before click", ptErr)
-	r.check("click inside editor", inp.MouseClick(editorX, editorY, 1))
-	time.Sleep(100 * time.Millisecond)
-	inp.MouseClick(editorX, editorY, 1) //nolint:errcheck
-	time.Sleep(500 * time.Millisecond)
-	ptEditorAfter, ptErr2 := find.GrabHash(sc, ptEditorRect, nil)
+	// Use the InputBundle DoubleClick helper to perform a platform-friendly
+	// double-click (click + short pause + click).
+	r.check("double-click inside editor", pf.Input.DoubleClick(editorX, editorY))
+
+	// Wait for pointer region to change indicating focus/cursor placement
+	ctxEditorClick, cancelEditorClick := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelEditorClick()
+	ptEditorAfter, ptErr2 := find.WaitForChange(ctxEditorClick, sc, ptEditorRect, ptEditorBefore, 100*time.Millisecond, nil)
+	if ptErr2 != nil {
+		ptEditorAfter, ptErr2 = find.GrabHash(sc, ptEditorRect, nil)
+	}
 	r.check("grab editor pointer region after click", ptErr2)
 	if ptErr == nil && ptErr2 == nil {
 		if ptEditorBefore == ptEditorAfter {
@@ -472,7 +571,6 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	r.check("grab editor before typing", err)
 
 	r.check("Type text", inp.Type("hello from perfuncted"))
-	time.Sleep(1 * time.Second)
 
 	// WaitForChange confirms text appeared without a fixed sleep.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -698,18 +796,15 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	// by the deferred proc.Process.Kill() immediately after testApp returns.
 	r.section("MOVE/RESIZE [" + app.name + "]")
 	wm.Activate(app.winMatch) //nolint:errcheck
-	time.Sleep(200 * time.Millisecond)
 
 	// In X11, Openbox might maximize windows. Force remove maximization.
 	if os.Getenv("WAYLAND_DISPLAY") == "" && os.Getenv("DISPLAY") != "" {
 		executil.CommandContext(context.Background(), "wmctrl", "-r", app.winMatch, "-b", "remove,maximized_vert,maximized_horz").Run() //nolint:errcheck
-		time.Sleep(200 * time.Millisecond)
 	}
 
 	const testX, testY, testW, testH = 50, 50, 900, 650
 	moveErr := wm.Move(app.winMatch, testX, testY)
 	if moveErr == nil {
-		time.Sleep(200 * time.Millisecond)
 		ctxMove, cancelMove := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancelMove()
 		if moved, mErr := pf.Window.WaitFor(ctxMove, app.winMatch, 300*time.Millisecond); mErr == nil {
@@ -729,7 +824,6 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 
 	resizeErr := wm.Resize(app.winMatch, testW, testH)
 	if resizeErr == nil {
-		time.Sleep(200 * time.Millisecond)
 		ctxResize, cancelResize := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancelResize()
 		if resized, rErr := pf.Window.WaitFor(ctxResize, app.winMatch, 300*time.Millisecond); rErr == nil {
@@ -780,14 +874,23 @@ func testApp(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 		if err := pf.Clipboard.Set(marker); err != nil {
 			r.fail("Clipboard Set: %v", err)
 		} else {
-			time.Sleep(200 * time.Millisecond)
-			got, err := pf.Clipboard.Get()
-			if err != nil {
-				r.fail("Clipboard Get: %v", err)
-			} else if strings.TrimSpace(got) == marker {
-				r.pass("Clipboard: round-trip OK")
+			// Wait for the clipboard to reflect the new value using RetryUntil
+			ctxClip, cancelClip := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelClip()
+			clipErr := perfuncted.RetryUntil(ctxClip, 100*time.Millisecond, func() error {
+				got, e := pf.Clipboard.Get()
+				if e != nil {
+					return e
+				}
+				if strings.TrimSpace(got) != marker {
+					return fmt.Errorf("clipboard not updated yet")
+				}
+				return nil
+			})
+			if clipErr != nil {
+				r.fail("Clipboard Get: %v", clipErr)
 			} else {
-				r.fail("Clipboard: expected %q got %q", marker, got)
+				r.pass("Clipboard: round-trip OK")
 			}
 		}
 	} else {
@@ -862,8 +965,50 @@ func testBrowser(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 		r.pass("Activate %s", app.name)
 	}
 	// Wait for Firefox to finish painting its initial UI before we hash the screen.
-	time.Sleep(2 * time.Second)
+	// If the window manager reports width/height as 0 initially, fall back to a
+	// bounded on-screen rect and wait until its hash stops changing instead of
+	// relying on a fixed sleep.
+	screenRect := image.Rect(0, 0, 1024, 768)
+	if w, h, err := pf.Screen.Resolution(); err == nil && w > 0 && h > 0 {
+		screenRect = image.Rect(0, 0, w, h)
+		if info.W <= 0 || info.H <= 0 {
+			info.W = w
+			info.H = h
+		}
+	} else if info.W <= 0 || info.H <= 0 {
+		info.W = screenRect.Dx()
+		info.H = screenRect.Dy()
+	}
 
+	waitRect := image.Rect(info.X, info.Y, info.X+info.W, info.Y+info.H).Intersect(screenRect)
+	if waitRect.Empty() {
+		waitRect = screenRect
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	const stableSamples = 2
+	stableCount := 0
+	var prevHash interface{}
+	var havePrev bool
+	for {
+		hash, err := pf.Screen.GrabHash(waitRect)
+		if err == nil {
+			if havePrev && hash == prevHash {
+				stableCount++
+				if stableCount >= stableSamples {
+					break
+				}
+			} else {
+				stableCount = 0
+				prevHash = hash
+				havePrev = true
+			}
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	active, err := wm.ActiveTitle()
 	r.check("read ActiveTitle", err)
 	if err == nil {
@@ -890,6 +1035,7 @@ func testBrowser(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	// Save a screenshot for visual inspection.
 	fpath := fmt.Sprintf("/tmp/%s-firefox-before.png", pfx)
 	savePNG2(sc, winRect, fpath)
+	defer os.Remove(fpath)
 	r.pass("screenshot before navigation -> %s", fpath)
 
 	// ── Mouse ────────────────────────────────────────────────────────────────
@@ -948,6 +1094,7 @@ func testBrowser(r *results, pf *perfuncted.Perfuncted, app appSpec) {
 	// Save a screenshot after navigation for visual confirmation.
 	fpath = fmt.Sprintf("/tmp/%s-firefox-after.png", pfx)
 	savePNG2(sc, winRect, fpath)
+	defer os.Remove(fpath)
 	r.pass("screenshot after navigation -> %s", fpath)
 
 	// ── Find ─────────────────────────────────────────────────────────────────
