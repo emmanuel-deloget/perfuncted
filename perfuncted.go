@@ -488,10 +488,12 @@ func (w WindowBundle) Restore(title string) error {
 	if w.Manager == nil {
 		return fmt.Errorf("window: not available")
 	}
-	if err := w.Manager.Activate(title); err == nil {
-		return nil
+	// Use the bundle's Activate which performs substring matching before calling
+	// the underlying Manager.Activate with the exact matched title.
+	if err := w.Activate(title); err != nil {
+		return fmt.Errorf("window: restore not supported or failed: %w", err)
 	}
-	return fmt.Errorf("window: restore not supported or failed to activate %q", title)
+	return nil
 }
 
 // GetGeometry returns the window geometry (x,y,w,h) for the first matching title.
