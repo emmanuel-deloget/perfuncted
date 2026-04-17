@@ -488,8 +488,11 @@ func (w WindowBundle) Restore(title string) error {
 	if w.Manager == nil {
 		return fmt.Errorf("window: not available")
 	}
-	// Use the bundle's Activate which performs substring matching before calling
-	// the underlying Manager.Activate with the exact matched title.
+	// Prefer backend-specific Restore if available.
+	if r, ok := w.Manager.(interface{ Restore(string) error }); ok {
+		return r.Restore(title)
+	}
+	// Fallback: Activate to un-minimize/raise as a best-effort restore.
 	if err := w.Activate(title); err != nil {
 		return fmt.Errorf("window: restore not supported or failed: %w", err)
 	}
@@ -736,6 +739,31 @@ type ClipboardBundle struct {
 	clipboard.Clipboard
 }
 
+// PasteWithInput sets the clipboard text and issues a paste keystroke (Ctrl+V)
+// via the supplied Inputter. Use this in tests by passing pftest.Clipboard and
+// pftest.Inputter to avoid spawning external clipboard helpers.
+func (c ClipboardBundle) PasteWithInput(inp input.Inputter, text string) error {
+	if c.Clipboard == nil {
+		return fmt.Errorf("clipboard: not available")
+	}
+	if inp == nil {
+		return fmt.Errorf("input: not available")
+	}
+	if err := c.Set(text); err != nil {
+		return err
+	}
+	// small delay to ensure clipboard contents are available to target apps
+	time.Sleep(75 * time.Millisecond)
+	if err := inp.KeyDown("ctrl"); err != nil {
+		return err
+	}
+	if err := inp.KeyTap("v"); err != nil {
+		_ = inp.KeyUp("ctrl")
+		return err
+	}
+	return inp.KeyUp("ctrl")
+}
+
 // Get reads the clipboard. The default clipboard backends enforce their own
 // command timeout so callers do not block indefinitely on hung tools.
 func (c ClipboardBundle) Get() (string, error) {
@@ -743,6 +771,27 @@ func (c ClipboardBundle) Get() (string, error) {
 		return "", fmt.Errorf("clipboard: not available")
 	}
 	return c.Clipboard.Get()
+}
+
+// Paste sets the clipboard text and issues a paste keystroke (Ctrl+V) using the
+// Perfuncted.Input bundle. This makes paste testable by injecting mock
+// Clipboard and Input backends (use pftest.New in tests).
+func (pf *Perfuncted) Paste(text string) error {
+	if pf == nil {
+		return fmt.Errorf("perfuncted: nil")
+	}
+	if pf.Clipboard.Clipboard == nil {
+		return fmt.Errorf("clipboard: not available")
+	}
+	if err := pf.Clipboard.Set(text); err != nil {
+		return err
+	}
+	// small delay to ensure clipboard contents are available to target apps
+	time.Sleep(75 * time.Millisecond)
+	if pf.Input.Inputter == nil {
+		return fmt.Errorf("input: not available")
+	}
+	return pf.Input.PressCombo("ctrl+v")
 }
 
 // Perfuncted bundles auto-detected screen, input, window, and clipboard backends.

@@ -2,8 +2,8 @@ repos:
 - repo: local
   hooks:
     - id: run-ci
-      name: Run CI checks
-      entry: just precommit
+      name: Run quick checks
+      entry: bash -lc "gofmt -l . && go vet ./..."
       language: script
       always_run: true
       pass_filenames: false

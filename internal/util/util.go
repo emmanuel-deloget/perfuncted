@@ -24,31 +24,8 @@ func WaitForPixelColor(sc find.Screenshotter, rect image.Rectangle, target color
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	_, err := find.WaitForFn(ctx, sc, rect, func(img image.Image) bool {
-		b := img.Bounds()
-		// Fast path for *image.RGBA
-		if rgba, ok := img.(*image.RGBA); ok {
-			for y := b.Min.Y; y < b.Max.Y; y++ {
-				off := (y-rgba.Rect.Min.Y)*rgba.Stride + (b.Min.X-rgba.Rect.Min.X)*4
-				for x := b.Min.X; x < b.Max.X; x++ {
-					p := rgba.Pix[off : off+4]
-					if abs(int(p[0])-int(target.R)) <= tolerance && abs(int(p[1])-int(target.G)) <= tolerance && abs(int(p[2])-int(target.B)) <= tolerance {
-						return true
-					}
-					off += 4
-				}
-			}
-			return false
-		}
-		// Generic slow path.
-		for y := b.Min.Y; y < b.Max.Y; y++ {
-			for x := b.Min.X; x < b.Max.X; x++ {
-				c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
-				if abs(int(c.R)-int(target.R)) <= tolerance && abs(int(c.G)-int(target.G)) <= tolerance && abs(int(c.B)-int(target.B)) <= tolerance {
-					return true
-				}
-			}
-		}
-		return false
+		_, ok := find.PixelFound(img, rect, target, tolerance)
+		return ok
 	}, 200*time.Millisecond)
 	if err != nil {
 		return false, err
