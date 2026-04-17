@@ -246,12 +246,49 @@ func (b *X11Backend) Maximize(title string) error {
 		return fmt.Errorf("window/x11: intern _NET_WM_STATE_MAXIMIZED_HORZ: %w", err)
 	}
 	data := [5]uint32{1 /* _NET_WM_STATE_ADD */, uint32(maxV.Atom), uint32(maxH.Atom), 1 /* source = application */, 0}
-	return xproto.SendEventChecked(b.conn, false, b.root,
+	if err := xproto.SendEventChecked(b.conn, false, b.root,
 		xproto.EventMaskSubstructureRedirect|xproto.EventMaskSubstructureNotify,
 		string(xproto.ClientMessageEvent{
 			Format: 32,
 			Window: win,
 			Type:   stateAtom.Atom,
 			Data:   xproto.ClientMessageDataUnionData32New(data[:]),
-		}.Bytes())).Check()
+		}.Bytes())).Check(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Restore attempts to un-maximize and un-minimize the window
+// by removing maximized state and activating it. It's best-effort.
+func (b *X11Backend) Restore(title string) error {
+	win, err := b.findByTitle(title)
+	if err != nil {
+		return err
+	}
+	stateAtom, err := xproto.InternAtom(b.conn, false, 14, "_NET_WM_STATE").Reply()
+	if err != nil {
+		return fmt.Errorf("window/x11: intern _NET_WM_STATE: %w", err)
+	}
+	maxV, err := xproto.InternAtom(b.conn, false, 28, "_NET_WM_STATE_MAXIMIZED_VERT").Reply()
+	if err != nil {
+		return fmt.Errorf("window/x11: intern _NET_WM_STATE_MAXIMIZED_VERT: %w", err)
+	}
+	maxH, err := xproto.InternAtom(b.conn, false, 28, "_NET_WM_STATE_MAXIMIZED_HORZ").Reply()
+	if err != nil {
+		return fmt.Errorf("window/x11: intern _NET_WM_STATE_MAXIMIZED_HORZ: %w", err)
+	}
+	data := [5]uint32{0 /* _NET_WM_STATE_REMOVE */, uint32(maxV.Atom), uint32(maxH.Atom), 1 /* source = application */, 0}
+	if err := xproto.SendEventChecked(b.conn, false, b.root,
+		xproto.EventMaskSubstructureRedirect|xproto.EventMaskSubstructureNotify,
+		string(xproto.ClientMessageEvent{
+			Format: 32,
+			Window: win,
+			Type:   stateAtom.Atom,
+			Data:   xproto.ClientMessageDataUnionData32New(data[:]),
+		}.Bytes())).Check(); err != nil {
+		return err
+	}
+	// Activate to raise/unminimize
+	return b.Activate(title)
 }

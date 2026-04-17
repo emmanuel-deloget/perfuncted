@@ -315,3 +315,18 @@ func (k *KWinScriptManager) Maximize(title string) error {
 	}
 	return nil
 }
+
+// Restore attempts to un-maximize and un-minimize the first matching window.
+func (k *KWinScriptManager) Restore(title string) error {
+	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
+	result, err := k.runScript(func(svc string) string {
+		return kwinFindWindowScript(safe, svc, "w.setMaximize(false, true); w.minimized = false; workspace.activateWindow(w);")
+	})
+	if err != nil {
+		return err
+	}
+	if result == "" {
+		return fmt.Errorf("window: window matching %q not found", title)
+	}
+	return nil
+}
