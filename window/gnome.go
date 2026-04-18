@@ -134,11 +134,6 @@ func (g *GnomeManager) Maximize(title string) error {
 	return g.actOnWindow(title, `w.maximize(3)`) // 3 = Meta.MaximizeFlags.BOTH
 }
 
-// Restore attempts to unmaximize/unminimize and activate the window.
-func (g *GnomeManager) Restore(title string) error {
-	return g.actOnWindow(title, `try { w.unmaximize(); w.unminimize(); w.activate(global.get_current_time()); } catch(e) {}`)
-}
-
 func (g *GnomeManager) Close() error {
 	return nil
 }

@@ -18,10 +18,6 @@ import (
 // Keyboard methods accept key names ("a", "ctrl", "return", "f5", etc.).
 // Mouse methods use screen-absolute pixel coordinates; button 1=left,
 // 2=middle, 3=right. Scroll methods accept a positive click count.
-// Note: some backends may optionally support raw scancode injection via a
-// separate Raw(scancode int) error method. That capability is intentionally
-// optional and should be detected at runtime via a type assertion on the
-// concrete backend implementation.
 type Inputter interface {
 	// KeyDown presses and holds a key.
 	KeyDown(key string) error
