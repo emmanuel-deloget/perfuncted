@@ -2,6 +2,7 @@
 package window
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -36,21 +37,21 @@ type Info struct {
 // first window whose title contains the given string is acted upon.
 type Manager interface {
 	// List returns all visible top-level windows.
-	List() ([]Info, error)
+	List(ctx context.Context) ([]Info, error)
 	// Activate brings the window matching title to the foreground.
-	Activate(title string) error
+	Activate(ctx context.Context, title string) error
 	// Move repositions the window matching title to (x, y).
-	Move(title string, x, y int) error
+	Move(ctx context.Context, title string, x, y int) error
 	// Resize changes the dimensions of the window matching title.
-	Resize(title string, w, h int) error
+	Resize(ctx context.Context, title string, w, h int) error
 	// ActiveTitle returns the title of the currently focused window.
-	ActiveTitle() (string, error)
+	ActiveTitle(ctx context.Context) (string, error)
 	// CloseWindow closes the window matching title.
-	CloseWindow(title string) error
+	CloseWindow(ctx context.Context, title string) error
 	// Minimize minimizes the window matching title.
-	Minimize(title string) error
+	Minimize(ctx context.Context, title string) error
 	// Maximize maximizes the window matching title.
-	Maximize(title string) error
+	Maximize(ctx context.Context, title string) error
 	// Close releases backend resources.
 	Close() error
 }

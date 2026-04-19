@@ -1,6 +1,7 @@
 package window
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -69,7 +70,7 @@ type swayRect struct {
 }
 
 // List returns all visible windows (leaf containers) in the sway tree.
-func (m *SwayManager) List() ([]Info, error) {
+func (m *SwayManager) List(ctx context.Context) ([]Info, error) {
 	raw, err := swayQuery(m.sock, swayMsgGetTree, "")
 	if err != nil {
 		return nil, fmt.Errorf("window/sway: get_tree: %w", err)
@@ -105,7 +106,7 @@ func collectLeaves(n *swayNode, out *[]Info) {
 }
 
 // ActiveTitle returns the title of the currently focused window.
-func (m *SwayManager) ActiveTitle() (string, error) {
+func (m *SwayManager) ActiveTitle(ctx context.Context) (string, error) {
 	raw, err := swayQuery(m.sock, swayMsgGetTree, "")
 	if err != nil {
 		return "", fmt.Errorf("window/sway: get_tree: %w", err)
@@ -138,8 +139,8 @@ func findFocused(n *swayNode) string {
 	return ""
 }
 
-func (m *SwayManager) findWindow(substr string) (Info, error) {
-	w, err := FindByTitle(m, substr)
+func (m *SwayManager) findWindow(ctx context.Context, substr string) (Info, error) {
+	w, err := FindByTitle(ctx, m, substr)
 	if err != nil {
 		return Info{}, fmt.Errorf("window/sway: %w", err)
 	}
@@ -163,8 +164,8 @@ func (m *SwayManager) swayCmd(cmd string) error {
 }
 
 // Activate focuses the first window whose title contains substr (case-insensitive).
-func (m *SwayManager) Activate(substr string) error {
-	w, err := m.findWindow(substr)
+func (m *SwayManager) Activate(ctx context.Context, substr string) error {
+	w, err := m.findWindow(ctx, substr)
 	if err != nil {
 		return err
 	}
@@ -173,8 +174,8 @@ func (m *SwayManager) Activate(substr string) error {
 
 // Move repositions the first window whose title contains substr.
 // The window is made floating so it can be placed at an absolute position.
-func (m *SwayManager) Move(substr string, x, y int) error {
-	w, err := m.findWindow(substr)
+func (m *SwayManager) Move(ctx context.Context, substr string, x, y int) error {
+	w, err := m.findWindow(ctx, substr)
 	if err != nil {
 		return err
 	}
@@ -185,7 +186,7 @@ func (m *SwayManager) Move(substr string, x, y int) error {
 	// the float layout reflow is complete (up to ~500 ms).
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		wins, _ := m.List()
+		wins, _ := m.List(ctx)
 		for _, win := range wins {
 			if win.ID == w.ID && (win.X != w.X || win.Y != w.Y) {
 				goto ready
@@ -198,8 +199,8 @@ ready:
 }
 
 // Resize changes the dimensions of the first window whose title contains substr.
-func (m *SwayManager) Resize(substr string, width, height int) error {
-	w, err := m.findWindow(substr)
+func (m *SwayManager) Resize(ctx context.Context, substr string, width, height int) error {
+	w, err := m.findWindow(ctx, substr)
 	if err != nil {
 		return err
 	}
@@ -214,8 +215,8 @@ func (m *SwayManager) Resize(substr string, width, height int) error {
 func (m *SwayManager) Close() error { return nil }
 
 // CloseWindow kills the first window whose title contains substr.
-func (m *SwayManager) CloseWindow(substr string) error {
-	w, err := m.findWindow(substr)
+func (m *SwayManager) CloseWindow(ctx context.Context, substr string) error {
+	w, err := m.findWindow(ctx, substr)
 	if err != nil {
 		return err
 	}
@@ -223,8 +224,8 @@ func (m *SwayManager) CloseWindow(substr string) error {
 }
 
 // Minimize moves the first matching window to the scratchpad (sway's minimization).
-func (m *SwayManager) Minimize(substr string) error {
-	w, err := m.findWindow(substr)
+func (m *SwayManager) Minimize(ctx context.Context, substr string) error {
+	w, err := m.findWindow(ctx, substr)
 	if err != nil {
 		return err
 	}
@@ -232,8 +233,8 @@ func (m *SwayManager) Minimize(substr string) error {
 }
 
 // Maximize toggles fullscreen on the first matching window.
-func (m *SwayManager) Maximize(substr string) error {
-	w, err := m.findWindow(substr)
+func (m *SwayManager) Maximize(ctx context.Context, substr string) error {
+	w, err := m.findWindow(ctx, substr)
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@
 package window
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/jezek/xgb"
@@ -78,7 +79,7 @@ func (b *X11Backend) windowPID(win xproto.Window) int32 {
 }
 
 // List returns all top-level windows from _NET_CLIENT_LIST.
-func (b *X11Backend) List() ([]Info, error) {
+func (b *X11Backend) List(ctx context.Context) ([]Info, error) {
 	rep, err := xproto.GetProperty(b.conn, false, b.root, b.atomNetClientList,
 		xproto.AtomWindow, 0, 1024).Reply()
 	if err != nil {
@@ -105,8 +106,8 @@ func (b *X11Backend) List() ([]Info, error) {
 }
 
 // findByTitle returns the first window whose title contains the given string (case-insensitive).
-func (b *X11Backend) findByTitle(title string) (xproto.Window, error) {
-	info, err := FindByTitle(b, title)
+func (b *X11Backend) findByTitle(ctx context.Context, title string) (xproto.Window, error) {
+	info, err := FindByTitle(ctx, b, title)
 	if err != nil {
 		return 0, fmt.Errorf("window/x11: %w", err)
 	}
@@ -114,8 +115,8 @@ func (b *X11Backend) findByTitle(title string) (xproto.Window, error) {
 }
 
 // Activate raises and focuses a window by title using _NET_ACTIVE_WINDOW.
-func (b *X11Backend) Activate(title string) error {
-	win, err := b.findByTitle(title)
+func (b *X11Backend) Activate(ctx context.Context, title string) error {
+	win, err := b.findByTitle(ctx, title)
 	if err != nil {
 		return err
 	}
@@ -131,8 +132,8 @@ func (b *X11Backend) Activate(title string) error {
 }
 
 // Move repositions a window by title.
-func (b *X11Backend) Move(title string, x, y int) error {
-	win, err := b.findByTitle(title)
+func (b *X11Backend) Move(ctx context.Context, title string, x, y int) error {
+	win, err := b.findByTitle(ctx, title)
 	if err != nil {
 		return err
 	}
@@ -142,8 +143,8 @@ func (b *X11Backend) Move(title string, x, y int) error {
 }
 
 // Resize changes window dimensions by title.
-func (b *X11Backend) Resize(title string, w, h int) error {
-	win, err := b.findByTitle(title)
+func (b *X11Backend) Resize(ctx context.Context, title string, w, h int) error {
+	win, err := b.findByTitle(ctx, title)
 	if err != nil {
 		return err
 	}
@@ -153,7 +154,7 @@ func (b *X11Backend) Resize(title string, w, h int) error {
 }
 
 // ActiveTitle returns the title of the currently focused window.
-func (b *X11Backend) ActiveTitle() (string, error) {
+func (b *X11Backend) ActiveTitle(ctx context.Context) (string, error) {
 	rep, err := xproto.GetProperty(b.conn, false, b.root, b.atomNetActiveWindow,
 		xproto.AtomWindow, 0, 1).Reply()
 	if err != nil {
@@ -174,8 +175,8 @@ func (b *X11Backend) Close() error {
 }
 
 // CloseWindow sends a WM_DELETE_WINDOW message to close the window gracefully.
-func (b *X11Backend) CloseWindow(title string) error {
-	win, err := b.findByTitle(title)
+func (b *X11Backend) CloseWindow(ctx context.Context, title string) error {
+	win, err := b.findByTitle(ctx, title)
 	if err != nil {
 		return err
 	}
@@ -199,8 +200,8 @@ func (b *X11Backend) CloseWindow(title string) error {
 }
 
 // Minimize iconifies the window by setting _NET_WM_STATE_HIDDEN via the WM.
-func (b *X11Backend) Minimize(title string) error {
-	win, err := b.findByTitle(title)
+func (b *X11Backend) Minimize(ctx context.Context, title string) error {
+	win, err := b.findByTitle(ctx, title)
 	if err != nil {
 		return err
 	}
@@ -221,8 +222,8 @@ func (b *X11Backend) Minimize(title string) error {
 }
 
 // Maximize sets _NET_WM_STATE_MAXIMIZED_VERT and _NET_WM_STATE_MAXIMIZED_HORZ.
-func (b *X11Backend) Maximize(title string) error {
-	win, err := b.findByTitle(title)
+func (b *X11Backend) Maximize(ctx context.Context, title string) error {
+	win, err := b.findByTitle(ctx, title)
 	if err != nil {
 		return err
 	}

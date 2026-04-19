@@ -418,17 +418,69 @@ type WindowBundle struct {
 	window.Manager
 }
 
+// Backwards-compatible wrappers: preserve old zero-context calls by delegating
+// to the new context-aware Manager using context.Background(). These are
+// convenience shims for callers (CLI/tests) that haven't migrated yet.
+func (w WindowBundle) List() ([]window.Info, error) {
+	if w.Manager == nil {
+		return nil, fmt.Errorf("window: not available")
+	}
+	return w.Manager.List(context.Background())
+}
+
+func (w WindowBundle) ActiveTitle() (string, error) {
+	if w.Manager == nil {
+		return "", fmt.Errorf("window: not available")
+	}
+	return w.Manager.ActiveTitle(context.Background())
+}
+
+func (w WindowBundle) CloseWindow(title string) error {
+	if w.Manager == nil {
+		return fmt.Errorf("window: not available")
+	}
+	return w.Manager.CloseWindow(context.Background(), title)
+}
+
+func (w WindowBundle) Move(title string, x, y int) error {
+	if w.Manager == nil {
+		return fmt.Errorf("window: not available")
+	}
+	return w.Manager.Move(context.Background(), title, x, y)
+}
+
+func (w WindowBundle) Resize(title string, width, height int) error {
+	if w.Manager == nil {
+		return fmt.Errorf("window: not available")
+	}
+	return w.Manager.Resize(context.Background(), title, width, height)
+}
+
+func (w WindowBundle) Minimize(title string) error {
+	if w.Manager == nil {
+		return fmt.Errorf("window: not available")
+	}
+	return w.Manager.Minimize(context.Background(), title)
+}
+
+func (w WindowBundle) Maximize(title string) error {
+	if w.Manager == nil {
+		return fmt.Errorf("window: not available")
+	}
+	return w.Manager.Maximize(context.Background(), title)
+}
+
 // Activate focuses the first window whose title contains pattern (case-insensitive).
 // Note: This operates on a "first match wins" basis.
 func (w WindowBundle) Activate(pattern string) error {
 	if w.Manager == nil {
 		return fmt.Errorf("window: not available")
 	}
-	info, err := window.FindByTitle(w.Manager, pattern)
+	info, err := window.FindByTitle(context.Background(), w.Manager, pattern)
 	if err != nil {
 		return fmt.Errorf("window: %w", err)
 	}
-	return w.Manager.Activate(info.Title)
+	return w.Manager.Activate(context.Background(), info.Title)
 }
 
 // FindByTitle returns the first window whose title contains pattern
@@ -438,7 +490,7 @@ func (w WindowBundle) FindByTitle(pattern string) (window.Info, error) {
 	if w.Manager == nil {
 		return window.Info{}, fmt.Errorf("window: not available")
 	}
-	info, err := window.FindByTitle(w.Manager, pattern)
+	info, err := window.FindByTitle(context.Background(), w.Manager, pattern)
 	if err != nil {
 		return window.Info{}, fmt.Errorf("window: %w", err)
 	}
@@ -450,31 +502,6 @@ func (w WindowBundle) FindByTitle(pattern string) (window.Info, error) {
 func (w WindowBundle) IsVisible(pattern string) bool {
 	_, err := w.FindByTitle(pattern)
 	return err == nil
-}
-
-// Resize changes the window dimensions for the first window whose title
-// contains title (case-insensitive).
-func (w WindowBundle) Resize(title string, width, height int) error {
-	if w.Manager == nil {
-		return fmt.Errorf("window: not available")
-	}
-	return w.Manager.Resize(title, width, height)
-}
-
-// Minimize instructs the compositor to minimize the window matching title.
-func (w WindowBundle) Minimize(title string) error {
-	if w.Manager == nil {
-		return fmt.Errorf("window: not available")
-	}
-	return w.Manager.Minimize(title)
-}
-
-// Maximize instructs the compositor to maximize the window matching title.
-func (w WindowBundle) Maximize(title string) error {
-	if w.Manager == nil {
-		return fmt.Errorf("window: not available")
-	}
-	return w.Manager.Maximize(title)
 }
 
 // Restore attempts to bring the window matching title back to a normal state.
@@ -519,7 +546,7 @@ func (w WindowBundle) GetProcess(title string) (int, error) {
 func (w WindowBundle) WaitFor(ctx context.Context, pattern string, poll time.Duration) (window.Info, error) {
 	lower := strings.ToLower(pattern)
 	for {
-		wins, err := w.Manager.List()
+		wins, err := w.Manager.List(ctx)
 		if err != nil {
 			return window.Info{}, fmt.Errorf("window: list: %w", err)
 		}
@@ -541,7 +568,7 @@ func (w WindowBundle) WaitFor(ctx context.Context, pattern string, poll time.Dur
 func (w WindowBundle) WaitForClose(ctx context.Context, pattern string, poll time.Duration) error {
 	lower := strings.ToLower(pattern)
 	for {
-		wins, err := w.Manager.List()
+		wins, err := w.Manager.List(ctx)
 		if err != nil {
 			return fmt.Errorf("window: list: %w", err)
 		}
@@ -566,12 +593,12 @@ func (w WindowBundle) WaitForClose(ctx context.Context, pattern string, poll tim
 // WaitForTitleChange polls ActiveTitle until it differs from current, or ctx
 // is cancelled. Returns the new active title.
 func (w WindowBundle) WaitForTitleChange(ctx context.Context, poll time.Duration) (string, error) {
-	current, err := w.Manager.ActiveTitle()
+	current, err := w.Manager.ActiveTitle(context.Background())
 	if err != nil {
 		return "", fmt.Errorf("window: active title: %w", err)
 	}
 	for {
-		title, err := w.Manager.ActiveTitle()
+		title, err := w.Manager.ActiveTitle(context.Background())
 		if err != nil {
 			return "", fmt.Errorf("window: active title: %w", err)
 		}

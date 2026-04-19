@@ -5,6 +5,7 @@ import (
 	"image"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/nskaggs/perfuncted/internal/shmutil"
 	"github.com/nskaggs/perfuncted/internal/wl"
@@ -25,21 +26,59 @@ type WlrScreencopyBackend struct {
 var (
 	wlrCacheMu sync.Mutex
 	wlrCaches  = map[string]*cachedWlrCtx{}
+	// TTL for cached contexts. Tests may override.
+	wlrCacheTTL    = 5 * time.Minute
+	wlrJanitorOnce sync.Once
+	// wlrConnect is a variable so tests can inject a fake connector.
+	wlrConnect = wl.Connect
 )
 
 type cachedWlrCtx struct {
-	ctx *wl.Context
-	mu  sync.Mutex
+	ctx      *wl.Context
+	mu       sync.Mutex
+	lastUsed time.Time
 }
 
 // withWlrContext ensures a wl.Context exists for sock and calls fn while
 // holding the per-context lock to serialize access. If the context appears
-// broken (fn returns an error), the context is closed and reset.
+// broken (fn returns an error), the context is closed and reset. A background
+// janitor evicts idle contexts after wlrCacheTTL.
 func withWlrContext(sock string, fn func(ctx *wl.Context) error) error {
+	// Start janitor once.
+	wlrJanitorOnce.Do(func() {
+		go func() {
+			interval := wlrCacheTTL / 10
+			if interval < time.Millisecond {
+				interval = time.Millisecond
+			}
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for range ticker.C {
+				now := time.Now()
+				wlrCacheMu.Lock()
+				for k, c := range wlrCaches {
+					c.mu.Lock()
+					idle := now.Sub(c.lastUsed)
+					if c.ctx != nil && idle > wlrCacheTTL {
+						_ = wl.SafeClose(c.ctx)
+						c.ctx = nil
+					}
+					if c.ctx == nil {
+						c.mu.Unlock()
+						delete(wlrCaches, k)
+						continue
+					}
+					c.mu.Unlock()
+				}
+				wlrCacheMu.Unlock()
+			}
+		}()
+	})
+
 	wlrCacheMu.Lock()
 	c := wlrCaches[sock]
 	if c == nil {
-		c = &cachedWlrCtx{}
+		c = &cachedWlrCtx{lastUsed: time.Now()}
 		wlrCaches[sock] = c
 	}
 	wlrCacheMu.Unlock()
@@ -47,18 +86,20 @@ func withWlrContext(sock string, fn func(ctx *wl.Context) error) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.ctx == nil {
-		ctx, err := wl.Connect(sock)
+		ctx, err := wlrConnect(sock)
 		if err != nil {
 			return fmt.Errorf("screen/wlr: connect: %w", err)
 		}
 		c.ctx = ctx
 	}
+	c.lastUsed = time.Now()
 	if err := fn(c.ctx); err != nil {
 		// reset cached context on error to allow reconnect next time
-		_ = c.ctx.Close()
+		_ = wl.SafeClose(c.ctx)
 		c.ctx = nil
 		return err
 	}
+	c.lastUsed = time.Now()
 	return nil
 }
 
@@ -244,7 +285,7 @@ func (b *WlrScreencopyBackend) Close() error {
 		// lock per-context to ensure no Grab is in progress
 		c.mu.Lock()
 		if c.ctx != nil {
-			_ = c.ctx.Close()
+			_ = wl.SafeClose(c.ctx)
 			c.ctx = nil
 		}
 		c.mu.Unlock()

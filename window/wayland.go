@@ -1,6 +1,7 @@
 package window
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -174,7 +175,7 @@ func (m *WaylandWindowManager) findToplevel(title string) (uint32, *Info, bool) 
 // List returns all top-level windows gathered from the foreign-toplevel protocol.
 // Each call performs a Wayland round-trip to process any pending events (new
 // windows, title changes, closures) before returning.
-func (m *WaylandWindowManager) List() ([]Info, error) {
+func (m *WaylandWindowManager) List(ctx context.Context) ([]Info, error) {
 	if err := m.display.RoundTrip(); err != nil {
 		return nil, fmt.Errorf("window/wayland: round-trip: %w", err)
 	}
@@ -186,7 +187,7 @@ func (m *WaylandWindowManager) List() ([]Info, error) {
 }
 
 // ActiveTitle returns the title of the currently focused window, if available.
-func (m *WaylandWindowManager) ActiveTitle() (string, error) {
+func (m *WaylandWindowManager) ActiveTitle(ctx context.Context) (string, error) {
 	if err := m.display.RoundTrip(); err != nil {
 		return "", fmt.Errorf("window/wayland: round-trip: %w", err)
 	}
@@ -201,7 +202,7 @@ func (m *WaylandWindowManager) ActiveTitle() (string, error) {
 // Activate raises a window by title substring. Activation requires a Wayland
 // seat and the zwlr foreign-toplevel control protocol; ext_foreign_toplevel_list_v1
 // is enumeration-only and cannot activate windows.
-func (m *WaylandWindowManager) Activate(title string) error {
+func (m *WaylandWindowManager) Activate(ctx context.Context, title string) error {
 	if err := m.display.RoundTrip(); err != nil {
 		return fmt.Errorf("window/wayland: round-trip: %w", err)
 	}
@@ -236,17 +237,21 @@ func (m *WaylandWindowManager) Activate(title string) error {
 }
 
 // Move returns ErrNotSupported; Wayland does not allow clients to reposition native windows.
-func (m *WaylandWindowManager) Move(_ string, _, _ int) error { return ErrNotSupported }
+func (m *WaylandWindowManager) Move(ctx context.Context, _ string, _, _ int) error {
+	return ErrNotSupported
+}
 
 // Resize returns ErrNotSupported; Wayland does not allow clients to resize native windows.
-func (m *WaylandWindowManager) Resize(_ string, _, _ int) error { return ErrNotSupported }
+func (m *WaylandWindowManager) Resize(ctx context.Context, _ string, _, _ int) error {
+	return ErrNotSupported
+}
 
 // CloseWindow requests that the toplevel close itself via the foreign-toplevel protocol.
-func (m *WaylandWindowManager) CloseWindow(title string) error {
+func (m *WaylandWindowManager) CloseWindow(ctx context.Context, title string) error {
 	if err := m.display.RoundTrip(); err != nil {
 		return fmt.Errorf("window/wayland: round-trip: %w", err)
 	}
-	info, err := FindByTitle(m, title)
+	info, err := FindByTitle(ctx, m, title)
 	if err != nil {
 		return fmt.Errorf("window/wayland: %w", err)
 	}
@@ -262,11 +267,11 @@ func (m *WaylandWindowManager) CloseWindow(title string) error {
 
 // Minimize requests the compositor to minimize the matching toplevel. This is
 // only available on zwlr_foreign_toplevel_manager_v1.
-func (m *WaylandWindowManager) Minimize(title string) error {
+func (m *WaylandWindowManager) Minimize(ctx context.Context, title string) error {
 	if err := m.display.RoundTrip(); err != nil {
 		return fmt.Errorf("window/wayland: round-trip: %w", err)
 	}
-	info, err := FindByTitle(m, title)
+	info, err := FindByTitle(ctx, m, title)
 	if err != nil {
 		return fmt.Errorf("window/wayland: %w", err)
 	}
@@ -282,11 +287,11 @@ func (m *WaylandWindowManager) Minimize(title string) error {
 
 // Maximize requests the compositor to maximize the matching toplevel. This is
 // only available on zwlr_foreign_toplevel_manager_v1.
-func (m *WaylandWindowManager) Maximize(title string) error {
+func (m *WaylandWindowManager) Maximize(ctx context.Context, title string) error {
 	if err := m.display.RoundTrip(); err != nil {
 		return fmt.Errorf("window/wayland: round-trip: %w", err)
 	}
-	info, err := FindByTitle(m, title)
+	info, err := FindByTitle(ctx, m, title)
 	if err != nil {
 		return fmt.Errorf("window/wayland: %w", err)
 	}

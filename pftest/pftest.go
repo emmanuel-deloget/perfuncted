@@ -20,6 +20,7 @@
 package pftest
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -194,7 +195,7 @@ type Manager struct {
 	titleIdx int
 }
 
-func (m *Manager) List() ([]window.Info, error) {
+func (m *Manager) List(ctx context.Context) ([]window.Info, error) {
 	if m.Err != nil {
 		return nil, m.Err
 	}
@@ -210,7 +211,7 @@ func (m *Manager) List() ([]window.Info, error) {
 	return r, nil
 }
 
-func (m *Manager) Activate(title string) error {
+func (m *Manager) Activate(ctx context.Context, title string) error {
 	if m.Err != nil {
 		return m.Err
 	}
@@ -220,7 +221,7 @@ func (m *Manager) Activate(title string) error {
 	return nil
 }
 
-func (m *Manager) ActiveTitle() (string, error) {
+func (m *Manager) ActiveTitle(ctx context.Context) (string, error) {
 	if m.Err != nil {
 		return "", m.Err
 	}
@@ -236,12 +237,12 @@ func (m *Manager) ActiveTitle() (string, error) {
 	return t, nil
 }
 
-func (m *Manager) Move(title string, x, y int) error   { return m.Err }
-func (m *Manager) Resize(title string, w, h int) error { return m.Err }
-func (m *Manager) CloseWindow(title string) error      { return m.Err }
-func (m *Manager) Minimize(title string) error         { return m.Err }
-func (m *Manager) Maximize(title string) error         { return m.Err }
-func (m *Manager) Close() error                        { return nil }
+func (m *Manager) Move(ctx context.Context, title string, x, y int) error   { return m.Err }
+func (m *Manager) Resize(ctx context.Context, title string, w, h int) error { return m.Err }
+func (m *Manager) CloseWindow(ctx context.Context, title string) error      { return m.Err }
+func (m *Manager) Minimize(ctx context.Context, title string) error         { return m.Err }
+func (m *Manager) Maximize(ctx context.Context, title string) error         { return m.Err }
+func (m *Manager) Close() error                                             { return nil }
 
 // Reset rewinds all queues and clears Activated.
 func (m *Manager) Reset() {

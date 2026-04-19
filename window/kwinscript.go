@@ -20,6 +20,7 @@
 package window
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -125,7 +126,7 @@ func (k *KWinScriptManager) runScript(buildJS func(svc string) string) (string, 
 }
 
 // List returns all normal top-level windows reported by workspace.windowList().
-func (k *KWinScriptManager) List() ([]Info, error) {
+func (k *KWinScriptManager) List(ctx context.Context) ([]Info, error) {
 	data, err := k.runScript(func(svc string) string {
 		return fmt.Sprintf(`
 var wins = workspace.windowList();
@@ -207,7 +208,7 @@ callDBus('%s', '/', '%s', 'ReportWindows', found);
 }
 
 // Activate raises and focuses the first window whose title contains substr.
-func (k *KWinScriptManager) Activate(title string) error {
+func (k *KWinScriptManager) Activate(ctx context.Context, title string) error {
 	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
 	result, err := k.runScript(func(svc string) string {
 		return kwinFindWindowScript(safe, svc,
@@ -223,7 +224,7 @@ func (k *KWinScriptManager) Activate(title string) error {
 }
 
 // ActiveTitle returns the caption of the currently focused window.
-func (k *KWinScriptManager) ActiveTitle() (string, error) {
+func (k *KWinScriptManager) ActiveTitle(ctx context.Context) (string, error) {
 	return k.runScript(func(svc string) string {
 		return fmt.Sprintf(`
 var w = workspace.activeWindow;
@@ -233,7 +234,7 @@ callDBus('%s', '/', '%s', 'ReportWindows', w ? w.caption : '');
 }
 
 // Move repositions the first window whose title contains substr via KWin scripting.
-func (k *KWinScriptManager) Move(title string, x, y int) error {
+func (k *KWinScriptManager) Move(ctx context.Context, title string, x, y int) error {
 	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
 	result, err := k.runScript(func(svc string) string {
 		action := fmt.Sprintf(
@@ -251,7 +252,7 @@ func (k *KWinScriptManager) Move(title string, x, y int) error {
 }
 
 // Resize changes the dimensions of the first window whose title contains substr via KWin scripting.
-func (k *KWinScriptManager) Resize(title string, w, h int) error {
+func (k *KWinScriptManager) Resize(ctx context.Context, title string, w, h int) error {
 	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
 	result, err := k.runScript(func(svc string) string {
 		action := fmt.Sprintf(
@@ -272,7 +273,7 @@ func (k *KWinScriptManager) Resize(title string, w, h int) error {
 func (k *KWinScriptManager) Close() error { return nil }
 
 // CloseWindow closes the first window whose title contains substr.
-func (k *KWinScriptManager) CloseWindow(title string) error {
+func (k *KWinScriptManager) CloseWindow(ctx context.Context, title string) error {
 	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
 	result, err := k.runScript(func(svc string) string {
 		return kwinFindWindowScript(safe, svc, "w.closeWindow();")
@@ -287,7 +288,7 @@ func (k *KWinScriptManager) CloseWindow(title string) error {
 }
 
 // Minimize minimizes the first window whose title contains substr.
-func (k *KWinScriptManager) Minimize(title string) error {
+func (k *KWinScriptManager) Minimize(ctx context.Context, title string) error {
 	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
 	result, err := k.runScript(func(svc string) string {
 		return kwinFindWindowScript(safe, svc, "w.minimized = true;")
@@ -302,7 +303,7 @@ func (k *KWinScriptManager) Minimize(title string) error {
 }
 
 // Maximize maximizes the first window whose title contains substr.
-func (k *KWinScriptManager) Maximize(title string) error {
+func (k *KWinScriptManager) Maximize(ctx context.Context, title string) error {
 	safe := strings.ReplaceAll(strings.ToLower(title), "'", "\\'")
 	result, err := k.runScript(func(svc string) string {
 		return kwinFindWindowScript(safe, svc, "w.setMaximize(true, true);")

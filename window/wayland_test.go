@@ -1,6 +1,7 @@
 package window
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -240,7 +241,7 @@ func TestWaylandWindowManager_Activate(t *testing.T) {
 			}
 			wm, ctx, handleID := newStubWaylandManager(title, true, tc.windowExists)
 
-			err := wm.Activate(tc.windowTitle)
+			err := wm.Activate(context.Background(), tc.windowTitle)
 
 			if tc.expectedError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.expectedError) {
@@ -291,7 +292,7 @@ func TestWaylandWindowManager_CloseWindow(t *testing.T) {
 			}
 			wm, ctx, handleID := newStubWaylandManager(title, true, false)
 
-			err := wm.CloseWindow(tc.windowTitle)
+			err := wm.CloseWindow(context.Background(), tc.windowTitle)
 
 			if tc.expectedError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.expectedError) {
@@ -341,7 +342,7 @@ func TestWaylandWindowManager_Minimize(t *testing.T) {
 			}
 			wm, ctx, handleID := newStubWaylandManager(title, true, false)
 
-			err := wm.Minimize(tc.windowTitle)
+			err := wm.Minimize(context.Background(), tc.windowTitle)
 
 			if tc.expectedError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.expectedError) {
@@ -391,7 +392,7 @@ func TestWaylandWindowManager_Maximize(t *testing.T) {
 			}
 			wm, ctx, handleID := newStubWaylandManager(title, true, false)
 
-			err := wm.Maximize(tc.windowTitle)
+			err := wm.Maximize(context.Background(), tc.windowTitle)
 
 			if tc.expectedError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.expectedError) {
@@ -418,7 +419,7 @@ func TestWaylandWindowManager_List(t *testing.T) {
 	wm.toplevels[handleID1] = &Info{ID: uint64(handleID1), Title: "Window One"}
 	wm.toplevels[handleID2] = &Info{ID: uint64(handleID2), Title: "Window Two"}
 
-	windows, err := wm.List()
+	windows, err := wm.List(context.Background())
 
 	if err != nil {
 		t.Fatalf("List() unexpected error: %v", err)
@@ -503,7 +504,7 @@ func TestWaylandWindowManager_List_RoundTripError(t *testing.T) {
 		return errors.New("simulated roundtrip error")
 	}
 
-	_, err := wm.List()
+	_, err := wm.List(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "window/wayland: round-trip: simulated roundtrip error") {
 		t.Errorf("List() error = %v, expected error containing %q", err, "window/wayland: round-trip: simulated roundtrip error")
 	}
@@ -513,10 +514,10 @@ func TestWaylandWindowManager_ExtForeignToplevelIsListOnly(t *testing.T) {
 	wm, ctx, _ := newStubWaylandManager("Ext Window", false, false)
 
 	for name, fn := range map[string]func() error{
-		"activate": func() error { return wm.Activate("Ext Window") },
-		"close":    func() error { return wm.CloseWindow("Ext Window") },
-		"minimize": func() error { return wm.Minimize("Ext Window") },
-		"maximize": func() error { return wm.Maximize("Ext Window") },
+		"activate": func() error { return wm.Activate(context.Background(), "Ext Window") },
+		"close":    func() error { return wm.CloseWindow(context.Background(), "Ext Window") },
+		"minimize": func() error { return wm.Minimize(context.Background(), "Ext Window") },
+		"maximize": func() error { return wm.Maximize(context.Background(), "Ext Window") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := fn(); !errors.Is(err, ErrNotSupported) {
@@ -533,7 +534,7 @@ func TestWaylandWindowManager_ExtForeignToplevelIsListOnly(t *testing.T) {
 func TestWaylandWindowManager_ActivateRequiresSeat(t *testing.T) {
 	wm, ctx, _ := newStubWaylandManager("Seatless", true, false)
 
-	err := wm.Activate("Seatless")
+	err := wm.Activate(context.Background(), "Seatless")
 	if !errors.Is(err, ErrNotSupported) {
 		t.Fatalf("Activate() error = %v, want ErrNotSupported", err)
 	}

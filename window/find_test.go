@@ -1,25 +1,28 @@
 package window
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // fakeManager implements Manager for testing FindByTitle.
 type fakeManager struct {
 	wins []Info
 }
 
-func (f *fakeManager) List() ([]Info, error)         { return f.wins, nil }
-func (f *fakeManager) Activate(string) error         { return nil }
-func (f *fakeManager) Move(string, int, int) error   { return nil }
-func (f *fakeManager) Resize(string, int, int) error { return nil }
-func (f *fakeManager) ActiveTitle() (string, error)  { return "", nil }
-func (f *fakeManager) CloseWindow(string) error      { return nil }
-func (f *fakeManager) Minimize(string) error         { return nil }
-func (f *fakeManager) Maximize(string) error         { return nil }
-func (f *fakeManager) Close() error                  { return nil }
+func (f *fakeManager) List(ctx context.Context) ([]Info, error)             { return f.wins, nil }
+func (f *fakeManager) Activate(ctx context.Context, _ string) error         { return nil }
+func (f *fakeManager) Move(ctx context.Context, _ string, _, _ int) error   { return nil }
+func (f *fakeManager) Resize(ctx context.Context, _ string, _, _ int) error { return nil }
+func (f *fakeManager) ActiveTitle(ctx context.Context) (string, error)      { return "", nil }
+func (f *fakeManager) CloseWindow(ctx context.Context, _ string) error      { return nil }
+func (f *fakeManager) Minimize(ctx context.Context, _ string) error         { return nil }
+func (f *fakeManager) Maximize(ctx context.Context, _ string) error         { return nil }
+func (f *fakeManager) Close() error                                         { return nil }
 
 func TestFindByTitle_FindsMatch(t *testing.T) {
 	m := &fakeManager{wins: []Info{{ID: 1, Title: "Hello World"}, {ID: 2, Title: "Other"}}}
-	w, err := FindByTitle(m, "world")
+	w, err := FindByTitle(context.Background(), m, "world")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -30,7 +33,7 @@ func TestFindByTitle_FindsMatch(t *testing.T) {
 
 func TestFindByTitle_NotFound(t *testing.T) {
 	m := &fakeManager{wins: []Info{{ID: 1, Title: "Foo"}}}
-	_, err := FindByTitle(m, "bar")
+	_, err := FindByTitle(context.Background(), m, "bar")
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

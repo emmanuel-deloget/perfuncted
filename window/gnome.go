@@ -4,6 +4,7 @@
 package window
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -51,7 +52,7 @@ func (g *GnomeManager) eval(js string) (string, error) {
 	return result, nil
 }
 
-func (g *GnomeManager) List() ([]Info, error) {
+func (g *GnomeManager) List(ctx context.Context) ([]Info, error) {
 	const js = `
 JSON.stringify(
   global.get_window_actors()
@@ -105,32 +106,32 @@ func (g *GnomeManager) actOnWindow(title, action string) error {
 	return err
 }
 
-func (g *GnomeManager) Activate(title string) error {
+func (g *GnomeManager) Activate(ctx context.Context, title string) error {
 	return g.actOnWindow(title, `w.activate(global.get_current_time())`)
 }
 
-func (g *GnomeManager) Move(title string, x, y int) error {
+func (g *GnomeManager) Move(ctx context.Context, title string, x, y int) error {
 	return g.actOnWindow(title, fmt.Sprintf(`w.move_frame(true, %d, %d)`, x, y))
 }
 
-func (g *GnomeManager) Resize(title string, w, h int) error {
+func (g *GnomeManager) Resize(ctx context.Context, title string, w, h int) error {
 	return g.actOnWindow(title, fmt.Sprintf(`w.move_resize_frame(true, w.get_frame_rect().x, w.get_frame_rect().y, %d, %d)`, w, h))
 }
 
-func (g *GnomeManager) ActiveTitle() (string, error) {
+func (g *GnomeManager) ActiveTitle(ctx context.Context) (string, error) {
 	js := `(function(){ let f=global.display.get_focus_window(); return f ? f.get_title() : ""; })()`
 	return g.eval(js)
 }
 
-func (g *GnomeManager) CloseWindow(title string) error {
+func (g *GnomeManager) CloseWindow(ctx context.Context, title string) error {
 	return g.actOnWindow(title, `w.delete(global.get_current_time())`)
 }
 
-func (g *GnomeManager) Minimize(title string) error {
+func (g *GnomeManager) Minimize(ctx context.Context, title string) error {
 	return g.actOnWindow(title, `w.minimize()`)
 }
 
-func (g *GnomeManager) Maximize(title string) error {
+func (g *GnomeManager) Maximize(ctx context.Context, title string) error {
 	return g.actOnWindow(title, `w.maximize(3)`) // 3 = Meta.MaximizeFlags.BOTH
 }
 

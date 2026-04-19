@@ -1,14 +1,15 @@
 package window
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
 
 // FindByTitle returns the first window whose title contains substr
 // (case-insensitive). Error messages are standardized for callers.
-func FindByTitle(m Manager, substr string) (Info, error) {
-	wins, err := m.List()
+func FindByTitle(ctx context.Context, m Manager, substr string) (Info, error) {
+	wins, err := m.List(ctx)
 	if err != nil {
 		return Info{}, err
 	}
