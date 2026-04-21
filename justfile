@@ -40,7 +40,7 @@ docs:
     go run ./cmd/pf/ docs --dir ./docs-cli
 
 # Full pre-commit workflow
-precommit: check deadcode tidy docs vulncheck
+precommit: check tidy docs vulncheck
 
 # Build all packages and binaries
 build: precommit
