@@ -1,16 +1,19 @@
-## pf screen grab-full
+## pf screen wait-with-tolerance
 
-Auto-generated wrapper for perfuncted.GrabFull
+Auto-generated wrapper for perfuncted.WaitWithTolerance
 
 ```
-pf screen grab-full [flags]
+pf screen wait-with-tolerance [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help         help for grab-full
-      --out string   output path
+  -h, --help          help for wait-with-tolerance
+      --poll string   poll
+      --radius int    radius
+      --rect string   x0,y0,x1,y1 (default "0,0,1920,1080")
+      --want int      want
 ```
 
 ### Options inherited from parent commands

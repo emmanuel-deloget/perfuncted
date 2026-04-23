@@ -1,16 +1,18 @@
-## pf screen grab-full
+## pf screen wait-for-stable
 
-Auto-generated wrapper for perfuncted.GrabFull
+Auto-generated wrapper for perfuncted.WaitForStable
 
 ```
-pf screen grab-full [flags]
+pf screen wait-for-stable [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help         help for grab-full
-      --out string   output path
+  -h, --help          help for wait-for-stable
+      --poll string   poll
+      --rect string   x0,y0,x1,y1 (default "0,0,1920,1080")
+      --stableN int   stableN
 ```
 
 ### Options inherited from parent commands

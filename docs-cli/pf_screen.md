@@ -29,5 +29,10 @@ Screen capture operations
 * [pf screen pixel](pf_screen_pixel.md)	 - Print the RGB colour of a single pixel
 * [pf screen pixel-to-screen](pf_screen_pixel-to-screen.md)	 - Auto-generated wrapper for perfuncted.PixelToScreen
 * [pf screen resolution](pf_screen_resolution.md)	 - Print the screen resolution
+* [pf screen wait-for](pf_screen_wait-for.md)	 - Auto-generated wrapper for perfuncted.WaitFor
+* [pf screen wait-for-change](pf_screen_wait-for-change.md)	 - Auto-generated wrapper for perfuncted.WaitForChange
+* [pf screen wait-for-no-change](pf_screen_wait-for-no-change.md)	 - Auto-generated wrapper for perfuncted.WaitForNoChange
+* [pf screen wait-for-stable](pf_screen_wait-for-stable.md)	 - Auto-generated wrapper for perfuncted.WaitForStable
+* [pf screen wait-with-tolerance](pf_screen_wait-with-tolerance.md)	 - Auto-generated wrapper for perfuncted.WaitWithTolerance
 * [pf screen watch](pf_screen_watch.md)	 - Continuously print hash changes in a screen region
 

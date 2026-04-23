@@ -1,16 +1,18 @@
-## pf screen grab-full
+## pf screen wait-for
 
-Auto-generated wrapper for perfuncted.GrabFull
+Auto-generated wrapper for perfuncted.WaitFor
 
 ```
-pf screen grab-full [flags]
+pf screen wait-for [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help         help for grab-full
-      --out string   output path
+  -h, --help          help for wait-for
+      --poll string   poll
+      --rect string   x0,y0,x1,y1 (default "0,0,1920,1080")
+      --want int      want
 ```
 
 ### Options inherited from parent commands
