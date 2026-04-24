@@ -679,7 +679,7 @@ func (w WindowBundle) Restore(pattern string) error {
 	if err := w.checkAvailable(); err != nil {
 		return err
 	}
-	return w.Manager.Maximize(context.Background(), pattern)
+	return w.Manager.Restore(context.Background(), pattern)
 }
 
 func (w WindowBundle) WaitFor(ctx context.Context, pattern string, poll time.Duration) (window.Info, error) {
