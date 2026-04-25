@@ -6,7 +6,7 @@ import (
 	"github.com/nskaggs/perfuncted/pftest"
 )
 
-func TestMoreFeatures(t *testing.T) {
+func TestClipboardBundle(t *testing.T) {
 	sc := &pftest.Screenshotter{Width: 1024, Height: 768}
 	inp := &pftest.Inputter{}
 	cb := &pftest.Clipboard{}

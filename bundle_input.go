@@ -14,6 +14,14 @@ type InputBundle struct {
 	input.Inputter
 }
 
+// Close delegates to the underlying Inputter Close method.
+func (i InputBundle) Close() error {
+	if i.Inputter == nil {
+		return nil
+	}
+	return i.Inputter.Close()
+}
+
 func (i InputBundle) checkAvailable() error {
 	return util.CheckAvailable("input", i.Inputter)
 }
@@ -48,9 +56,6 @@ func (i InputBundle) TypeWithDelayContext(ctx context.Context, text string, dela
 			t.Stop()
 			return ctx.Err()
 		case <-t.C:
-		}
-		if !t.Stop() {
-			// drained above
 		}
 	}
 	return nil

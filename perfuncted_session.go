@@ -115,7 +115,8 @@ func StartSession(cfg SessionConfig) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("session: mkdirtemp: %w", err)
 	}
-	if err := os.Chmod(xdgDir, 0700); err != nil {
+	err = os.Chmod(xdgDir, 0700)
+	if err != nil {
 		os.RemoveAll(xdgDir)
 		return nil, fmt.Errorf("session: chmod: %w", err)
 	}
@@ -128,7 +129,8 @@ func StartSession(cfg SessionConfig) (*Session, error) {
 	}
 
 	// 1. Launch dbus-daemon.
-	if err := s.launchDBus(); err != nil {
+	err = s.launchDBus()
+	if err != nil {
 		s.Stop()
 		return nil, fmt.Errorf("session: dbus: %w", err)
 	}
@@ -205,8 +207,9 @@ func (s *Session) Perfuncted(opts Options) (*Perfuncted, error) {
 // receives an interrupt/termination signal. It returns a function that
 // unregisters the handler without stopping the session.
 func (s *Session) CleanupOnSignal(ctx context.Context) func() {
-	if ctx == nil {
-		ctx = context.Background()
+	var done <-chan struct{}
+	if ctx != nil {
+		done = ctx.Done()
 	}
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
@@ -214,7 +217,7 @@ func (s *Session) CleanupOnSignal(ctx context.Context) func() {
 	go func() {
 		defer signal.Stop(sigs)
 		select {
-		case <-ctx.Done():
+		case <-done:
 			s.Stop()
 		case <-sigs:
 			s.Stop()
@@ -325,14 +328,14 @@ func (s *Session) launchWlPaste() {
 	cmd := executil.CommandContext(context.Background(), "wl-paste", "--watch", "cat")
 	cmd.Env = s.Env()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err == nil {
+	err := cmd.Start()
+	if err == nil {
 		s.wlPastePid = cmd.Process.Pid
 		s.wlPasteCmd = cmd
 		return
-	} else {
-		// Best-effort background helper failed to start; log so users see the reason.
-		log.Printf("warning: wl-paste helper failed to start: %v", err)
 	}
+	// Best-effort background helper failed to start; log so users see the reason.
+	log.Printf("warning: wl-paste helper failed to start: %v", err)
 }
 
 func (s *Session) stopManagedProcess(cmd *exec.Cmd, pid int, waitTimeout time.Duration) {

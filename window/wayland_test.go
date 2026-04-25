@@ -61,7 +61,9 @@ func (d *mockWaylandDisplay) GetRegistry() (*wl.Registry, error) {
 	buf = put32(buf, 1)          // wl_display ID
 	buf = put32(buf, (12<<16)|1) // size=12, opcode=1 (get_registry)
 	buf = put32(buf, reg.ID())
-	d.ctx.WriteMsg(buf, nil)
+	if err := d.ctx.WriteMsg(buf, nil); err != nil {
+		return nil, err
+	}
 	return reg, nil
 }
 func (d *mockWaylandDisplay) Sync() (*wl.Callback, error) {
@@ -72,12 +74,17 @@ func (d *mockWaylandDisplay) Sync() (*wl.Callback, error) {
 	buf = put32(buf, 1)          // wl_display ID
 	buf = put32(buf, (12 << 16)) // size=12, opcode=0 (sync)
 	buf = put32(buf, cb.ID())
-	d.ctx.WriteMsg(buf, nil)
+	if err := d.ctx.WriteMsg(buf, nil); err != nil {
+		return nil, err
+	}
 	return cb, nil
 }
 func (d *mockWaylandDisplay) RoundTrip() error {
 	// Mock RoundTrip: simulate a done event immediately
-	cb, _ := d.Sync()
+	cb, err := d.Sync()
+	if err != nil {
+		return err
+	}
 	cb.SetDoneHandler(func() {
 		// Simulate dispatching a done event for the callback
 		cb.Dispatch(0, -1, nil) // opcode 0 for done event
@@ -102,6 +109,10 @@ func (p *mockRawProxy) Dispatch(opcode uint32, fd int, data []byte) {
 		p.OnEventMock(opcode, fd, data)
 	}
 }
+
+func (p *mockRawProxy) SetCtx(c wl.Ctx) { p.BaseProxy.SetCtx(c) }
+func (p *mockRawProxy) ID() uint32      { return p.BaseProxy.ID() }
+func (p *mockRawProxy) SetID(id uint32) { p.BaseProxy.SetID(id) }
 
 // Mock for the wl.Registry SetGlobalHandler
 type mockRegistry struct {
@@ -261,20 +272,24 @@ func TestWaylandWindowManager_Activate(t *testing.T) {
 	}
 }
 
-// TestWaylandWindowManager_CloseWindow tests the CloseWindow method.
-func TestWaylandWindowManager_CloseWindow(t *testing.T) {
+func runWindowActionTest(
+	t *testing.T,
+	actionName string,
+	existingTitle string,
+	expectedOpcode uint32,
+	action func(*WaylandWindowManager, context.Context, string) error,
+) {
+	t.Helper()
 	testCases := []struct {
 		name          string
 		windowTitle   string
 		windowExists  bool
-		expectedCmd   string
 		expectedError string
 	}{
 		{
 			name:         "Window exists",
-			windowTitle:  "CloseMe",
+			windowTitle:  existingTitle,
 			windowExists: true,
-			expectedCmd:  "close", // Check for the presence of the close request
 		},
 		{
 			name:          "Window does not exist",
@@ -288,127 +303,66 @@ func TestWaylandWindowManager_CloseWindow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			title := ""
 			if tc.windowExists {
-				title = "CloseMe"
+				title = existingTitle
 			}
 			wm, ctx, handleID := newStubWaylandManager(title, true, false)
 
-			err := wm.CloseWindow(context.Background(), tc.windowTitle)
+			err := action(wm, context.Background(), tc.windowTitle)
 
 			if tc.expectedError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.expectedError) {
-					t.Errorf("CloseWindow(%q) error = %v, expected error containing %q", tc.windowTitle, err, tc.expectedError)
+					t.Errorf("%s(%q) error = %v, expected error containing %q", actionName, tc.windowTitle, err, tc.expectedError)
 				}
 			} else if err != nil {
-				t.Errorf("CloseWindow(%q) unexpected error: %v", tc.windowTitle, err)
+				t.Errorf("%s(%q) unexpected error: %v", actionName, tc.windowTitle, err)
 			}
 
-			if tc.expectedCmd != "" && tc.expectedError == "" {
-				if !sawHandleRequest(ctx, handleID, 5) {
-					t.Errorf("CloseWindow(%q) did not send the expected close request", tc.windowTitle)
+			if tc.expectedError == "" {
+				if !sawHandleRequest(ctx, handleID, expectedOpcode) {
+					t.Errorf("%s(%q) did not send the expected request", actionName, tc.windowTitle)
 				}
 			}
 		})
 	}
+}
+
+// TestWaylandWindowManager_CloseWindow tests the CloseWindow method.
+func TestWaylandWindowManager_CloseWindow(t *testing.T) {
+	runWindowActionTest(
+		t,
+		"CloseWindow",
+		"CloseMe",
+		5,
+		func(wm *WaylandWindowManager, ctx context.Context, title string) error {
+			return wm.CloseWindow(ctx, title)
+		},
+	)
 }
 
 // TestWaylandWindowManager_Minimize tests the Minimize method.
 func TestWaylandWindowManager_Minimize(t *testing.T) {
-	testCases := []struct {
-		name          string
-		windowTitle   string
-		windowExists  bool
-		expectedCmd   string
-		expectedError string
-	}{
-		{
-			name:         "Window exists",
-			windowTitle:  "MinimizeMe",
-			windowExists: true,
-			expectedCmd:  "minimize", // Check for the presence of the minimize request
+	runWindowActionTest(
+		t,
+		"Minimize",
+		"MinimizeMe",
+		2,
+		func(wm *WaylandWindowManager, ctx context.Context, title string) error {
+			return wm.Minimize(ctx, title)
 		},
-		{
-			name:          "Window does not exist",
-			windowTitle:   "Nonexistent Window",
-			windowExists:  false,
-			expectedError: `window/wayland: window matching "Nonexistent Window" not found`,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			title := ""
-			if tc.windowExists {
-				title = "MinimizeMe"
-			}
-			wm, ctx, handleID := newStubWaylandManager(title, true, false)
-
-			err := wm.Minimize(context.Background(), tc.windowTitle)
-
-			if tc.expectedError != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.expectedError) {
-					t.Errorf("Minimize(%q) error = %v, expected error containing %q", tc.windowTitle, err, tc.expectedError)
-				}
-			} else if err != nil {
-				t.Errorf("Minimize(%q) unexpected error: %v", tc.windowTitle, err)
-			}
-
-			if tc.expectedCmd != "" && tc.expectedError == "" {
-				if !sawHandleRequest(ctx, handleID, 2) {
-					t.Errorf("Minimize(%q) did not send the expected minimize request", tc.windowTitle)
-				}
-			}
-		})
-	}
+	)
 }
 
 // TestWaylandWindowManager_Maximize tests the Maximize method.
 func TestWaylandWindowManager_Maximize(t *testing.T) {
-	testCases := []struct {
-		name          string
-		windowTitle   string
-		windowExists  bool
-		expectedCmd   string
-		expectedError string
-	}{
-		{
-			name:         "Window exists",
-			windowTitle:  "MaximizeMe",
-			windowExists: true,
-			expectedCmd:  "maximize", // Check for the presence of the maximize request
+	runWindowActionTest(
+		t,
+		"Maximize",
+		"MaximizeMe",
+		0,
+		func(wm *WaylandWindowManager, ctx context.Context, title string) error {
+			return wm.Maximize(ctx, title)
 		},
-		{
-			name:          "Window does not exist",
-			windowTitle:   "Nonexistent Window",
-			windowExists:  false,
-			expectedError: `window/wayland: window matching "Nonexistent Window" not found`,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			title := ""
-			if tc.windowExists {
-				title = "MaximizeMe"
-			}
-			wm, ctx, handleID := newStubWaylandManager(title, true, false)
-
-			err := wm.Maximize(context.Background(), tc.windowTitle)
-
-			if tc.expectedError != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.expectedError) {
-					t.Errorf("Maximize(%q) error = %v, expected error containing %q", tc.windowTitle, err, tc.expectedError)
-				}
-			} else if err != nil {
-				t.Errorf("Maximize(%q) unexpected error: %v", tc.windowTitle, err)
-			}
-
-			if tc.expectedCmd != "" && tc.expectedError == "" {
-				if !sawHandleRequest(ctx, handleID, 0) {
-					t.Errorf("Maximize(%q) did not send the expected maximize request", tc.windowTitle)
-				}
-			}
-		})
-	}
+	)
 }
 
 // TestWaylandWindowManager_List tests the List method.
