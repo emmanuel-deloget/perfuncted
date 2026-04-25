@@ -20,7 +20,6 @@ Screen capture operations
 
 * [pf](pf.md)	 - perfuncted — screen automation CLI
 * [pf screen capture-region](pf_screen_capture-region.md)	 - Auto-generated wrapper for perfuncted.CaptureRegion
-* [pf screen close](pf_screen_close.md)	 - Auto-generated wrapper for perfuncted.Close
 * [pf screen grab](pf_screen_grab.md)	 - Capture a screen region and save as PNG
 * [pf screen grab-full](pf_screen_grab-full.md)	 - Auto-generated wrapper for perfuncted.GrabFull
 * [pf screen grab-full-hash](pf_screen_grab-full-hash.md)	 - Auto-generated wrapper for perfuncted.GrabFullHash
@@ -33,6 +32,7 @@ Screen capture operations
 * [pf screen wait-for-change](pf_screen_wait-for-change.md)	 - Auto-generated wrapper for perfuncted.WaitForChange
 * [pf screen wait-for-no-change](pf_screen_wait-for-no-change.md)	 - Auto-generated wrapper for perfuncted.WaitForNoChange
 * [pf screen wait-for-stable](pf_screen_wait-for-stable.md)	 - Auto-generated wrapper for perfuncted.WaitForStable
+* [pf screen wait-for-visible-change](pf_screen_wait-for-visible-change.md)	 - Auto-generated wrapper for perfuncted.WaitForVisibleChange
 * [pf screen wait-with-tolerance](pf_screen_wait-with-tolerance.md)	 - Auto-generated wrapper for perfuncted.WaitWithTolerance
 * [pf screen watch](pf_screen_watch.md)	 - Continuously print hash changes in a screen region
 

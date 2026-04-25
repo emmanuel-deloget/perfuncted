@@ -18,6 +18,7 @@ func (f *fakeManager) ActiveTitle(ctx context.Context) (string, error)      { re
 func (f *fakeManager) CloseWindow(ctx context.Context, _ string) error      { return nil }
 func (f *fakeManager) Minimize(ctx context.Context, _ string) error         { return nil }
 func (f *fakeManager) Maximize(ctx context.Context, _ string) error         { return nil }
+func (f *fakeManager) Restore(ctx context.Context, _ string) error          { return nil }
 func (f *fakeManager) Close() error                                         { return nil }
 
 func TestFindByTitle_FindsMatch(t *testing.T) {

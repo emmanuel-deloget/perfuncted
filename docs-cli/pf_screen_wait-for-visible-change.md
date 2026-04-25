@@ -1,15 +1,18 @@
-## pf screen close
+## pf screen wait-for-visible-change
 
-Auto-generated wrapper for perfuncted.Close
+Auto-generated wrapper for perfuncted.WaitForVisibleChange
 
 ```
-pf screen close [flags]
+pf screen wait-for-visible-change [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for close
+  -h, --help          help for wait-for-visible-change
+      --poll string   poll
+      --rect string   x0,y0,x1,y1 (default "0,0,1920,1080")
+      --stable int    stable
 ```
 
 ### Options inherited from parent commands

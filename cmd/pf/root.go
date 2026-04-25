@@ -460,10 +460,12 @@ Runs until --duration expires or Ctrl+C.`,
 				} else {
 					streak++
 				}
+				timer := time.NewTimer(poll)
 				select {
 				case <-ctx.Done():
+					timer.Stop()
 					return nil
-				case <-time.After(poll):
+				case <-timer.C:
 				}
 			}
 		},
@@ -523,7 +525,7 @@ func inputCmd(openPF func() (*perfuncted.Perfuncted, error)) *cobra.Command {
 				return err
 			}
 			defer pf.Close()
-			if err := pf.Input.Move(mx, my); err != nil {
+			if err := pf.Input.MouseMove(mx, my); err != nil {
 				return err
 			}
 			fmt.Printf("moved to %d,%d\n", mx, my)
@@ -692,7 +694,7 @@ func inputCmd(openPF func() (*perfuncted.Perfuncted, error)) *cobra.Command {
 			}
 			defer pf.Close()
 			if mdx != -1 && mdy != -1 {
-				if err := pf.Input.Move(mdx, mdy); err != nil {
+				if err := pf.Input.MouseMove(mdx, mdy); err != nil {
 					return err
 				}
 			}
@@ -718,7 +720,7 @@ func inputCmd(openPF func() (*perfuncted.Perfuncted, error)) *cobra.Command {
 			}
 			defer pf.Close()
 			if mux != -1 && muy != -1 {
-				if err := pf.Input.Move(mux, muy); err != nil {
+				if err := pf.Input.MouseMove(mux, muy); err != nil {
 					return err
 				}
 			}

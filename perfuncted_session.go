@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"image"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -77,16 +78,20 @@ func (m *managedProc) stop(waitTimeout time.Duration) {
 		_ = m.cmd.Wait()
 		close(done)
 	}()
+	outer := time.NewTimer(waitTimeout)
 	select {
 	case <-done:
+		outer.Stop()
 		return
-	case <-time.After(waitTimeout):
+	case <-outer.C:
 		// Force kill the process group.
 		_ = syscall.Kill(-m.pid, syscall.SIGKILL)
+		inner := time.NewTimer(waitTimeout)
 		select {
 		case <-done:
+			inner.Stop()
 			return
-		case <-time.After(waitTimeout):
+		case <-inner.C:
 			return
 		}
 	}
@@ -153,12 +158,18 @@ func StartSession(cfg SessionConfig) (*Session, error) {
 // Launch starts a subprocess inside the session with the correct environment.
 // The caller is responsible for waiting on or killing the returned Cmd.
 func (s *Session) Launch(name string, args ...string) (*exec.Cmd, error) {
+	return s.LaunchEnv(nil, name, args...)
+}
+
+// LaunchEnv starts a subprocess inside the session with the correct
+// environment plus any additional overrides in extraEnv.
+func (s *Session) LaunchEnv(extraEnv []string, name string, args ...string) (*exec.Cmd, error) {
 	path, err := executil.LookPath(name)
 	if err != nil {
 		return nil, fmt.Errorf("session: %s not found: %w", name, err)
 	}
 	cmd := executil.CommandContext(context.Background(), path, args...)
-	cmd.Env = s.Env()
+	cmd.Env = env.Merge(s.Env(), extraEnv...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("session: start %s: %w", name, err)
@@ -248,7 +259,10 @@ func (s *Session) launchDBus() error {
 	cmd := executil.CommandContext(context.Background(), "dbus-daemon", "--session",
 		"--address="+s.dbusAddr,
 		"--nofork", "--nopidfile")
-	cmd.Env = env.Merge(os.Environ(), "XDG_RUNTIME_DIR="+s.xdgDir)
+	cmd.Env = env.Current().
+		WithSession(s.xdgDir, s.wlDisplay, s.dbusAddr).
+		Without("WAYLAND_DISPLAY").
+		EnvList()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return err
@@ -272,11 +286,14 @@ func (s *Session) launchSway(confPath string) error {
 	}
 
 	cmd := executil.CommandContext(context.Background(), "sway", "--unsupported-gpu", "-c", confPath)
-	cmd.Env = env.Merge(os.Environ(),
+	// Start the compositor with its target runtime variables, but do not pass
+	// SWAYSOCK=. Sway owns this variable and uses it for its IPC socket path.
+	cmd.Env = env.Merge(env.Current().
+		WithSession(s.xdgDir, s.wlDisplay, s.dbusAddr).
+		Without("SWAYSOCK").
+		EnvList(),
 		"WLR_BACKENDS=headless",
 		"WLR_RENDERER=pixman",
-		"XDG_RUNTIME_DIR="+s.xdgDir,
-		"DBUS_SESSION_BUS_ADDRESS="+s.dbusAddr,
 	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -306,15 +323,15 @@ func (s *Session) launchSway(confPath string) error {
 
 func (s *Session) launchWlPaste() {
 	cmd := executil.CommandContext(context.Background(), "wl-paste", "--watch", "cat")
-	cmd.Env = env.Merge(os.Environ(),
-		"XDG_RUNTIME_DIR="+s.xdgDir,
-		"WAYLAND_DISPLAY="+s.wlDisplay,
-		"DBUS_SESSION_BUS_ADDRESS="+s.dbusAddr,
-	)
+	cmd.Env = s.Env()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err == nil {
 		s.wlPastePid = cmd.Process.Pid
 		s.wlPasteCmd = cmd
+		return
+	} else {
+		// Best-effort background helper failed to start; log so users see the reason.
+		log.Printf("warning: wl-paste helper failed to start: %v", err)
 	}
 }
 
