@@ -101,6 +101,9 @@ type Result struct {
 // On success, it returns the final hash (which equals want). On timeout, it returns
 // the last observed hash for debugging.
 func WaitFor(ctx context.Context, sc Screenshotter, rect image.Rectangle, want uint32, poll time.Duration, newHash Hasher) (uint32, error) {
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
 	for {
 		h, err := GrabHash(ctx, sc, rect, newHash)
 		if err != nil {
@@ -109,12 +112,10 @@ func WaitFor(ctx context.Context, sc Screenshotter, rect image.Rectangle, want u
 		if h == want {
 			return h, nil
 		}
-		timer := time.NewTimer(poll)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return h, fmt.Errorf("find: timeout waiting for hash %08x (last: %08x)", want, h)
-		case <-timer.C:
+		case <-ticker.C:
 		}
 	}
 }
@@ -123,6 +124,9 @@ func WaitFor(ctx context.Context, sc Screenshotter, rect image.Rectangle, want u
 // It pairs with WaitForNoChange: use WaitForChange to detect when a transition begins,
 // then WaitForNoChange to detect when it ends.
 func WaitForChange(ctx context.Context, sc Screenshotter, rect image.Rectangle, initial uint32, poll time.Duration, newHash Hasher) (uint32, error) {
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
 	for {
 		h, err := GrabHash(ctx, sc, rect, newHash)
 		if err != nil {
@@ -131,12 +135,10 @@ func WaitForChange(ctx context.Context, sc Screenshotter, rect image.Rectangle, 
 		if h != initial {
 			return h, nil
 		}
-		timer := time.NewTimer(poll)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return 0, fmt.Errorf("find: timeout waiting for change in rect %v (hash stable at %08x)", rect, initial)
-		case <-timer.C:
+		case <-ticker.C:
 		}
 	}
 }
@@ -157,6 +159,9 @@ func WaitForNoChange(ctx context.Context, sc Screenshotter, rect image.Rectangle
 	sentinelSet := false
 	streak := 0
 
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
 	for {
 		img, err := sc.Grab(ctx, rect)
 		if err != nil {
@@ -173,12 +178,10 @@ func WaitForNoChange(ctx context.Context, sc Screenshotter, rect image.Rectangle
 			sentinel = cur
 			last = 0 // force mismatch on next full hash
 			streak = 0
-			timer := time.NewTimer(poll)
 			select {
 			case <-ctx.Done():
-				timer.Stop()
 				return last, fmt.Errorf("find: WaitForNoChange timeout: region still changing after %d/%d stable samples (last hash %08x)", streak, stable, last)
-			case <-timer.C:
+			case <-ticker.C:
 			}
 			continue
 		}
@@ -195,12 +198,10 @@ func WaitForNoChange(ctx context.Context, sc Screenshotter, rect image.Rectangle
 			last = h
 			streak = 1
 		}
-		timer := time.NewTimer(poll)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return last, fmt.Errorf("find: WaitForNoChange timeout: region still changing after %d/%d stable samples (last hash %08x)", streak, stable, last)
-		case <-timer.C:
+		case <-ticker.C:
 		}
 	}
 }
@@ -227,6 +228,9 @@ func ScanFor(ctx context.Context, sc Screenshotter, rects []image.Rectangle, wan
 	}
 	bboxArea := bbox.Dx() * bbox.Dy()
 	useBbox := bboxArea <= 2*totalArea
+
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
 
 	for {
 		if useBbox {
@@ -267,12 +271,10 @@ func ScanFor(ctx context.Context, sc Screenshotter, rects []image.Rectangle, wan
 				}
 			}
 		}
-		timer := time.NewTimer(poll)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return Result{}, fmt.Errorf("find: timeout scanning %d regions", len(rects))
-		case <-timer.C:
+		case <-ticker.C:
 		}
 	}
 }
@@ -380,8 +382,10 @@ func matchAt(src, ref image.Image, ox, oy int) bool {
 }
 
 // WaitWithTolerance pads expectedRect by radius pixels on all sides, captures the larger
-// region, and performs an exact hash search of that size within it.
-func WaitWithTolerance(ctx context.Context, sc Screenshotter, expectedRect image.Rectangle, targetHash uint32, radius int, poll time.Duration, newHash Hasher) (uint32, image.Rectangle, error) {
+// region, and performs an exact search for reference within it. A two-stage
+// search is used: a cheap top-left pixel/fingerprint scan followed by an
+// expensive full-rectangle hash only on promising candidates.
+func WaitWithTolerance(ctx context.Context, sc Screenshotter, expectedRect image.Rectangle, reference image.Image, radius int, poll time.Duration, newHash Hasher) (uint32, image.Rectangle, error) {
 	if newHash == nil {
 		newHash = DefaultHasher
 	}
@@ -392,6 +396,25 @@ func WaitWithTolerance(ctx context.Context, sc Screenshotter, expectedRect image
 		expectedRect.Max.Y+radius,
 	)
 
+	// Precompute reference hash and top-left pixel for quick rejection.
+	refHash := PixelHash(reference, newHash)
+	rb := reference.Bounds()
+	w, h := rb.Dx(), rb.Dy()
+
+	var refFirst color.RGBA
+	refRGBA, refOk := reference.(*image.RGBA)
+	if refOk {
+		refOff0 := (rb.Min.Y-refRGBA.Rect.Min.Y)*refRGBA.Stride + (rb.Min.X-refRGBA.Rect.Min.X)*4
+		refFirst = color.RGBA{
+			R: refRGBA.Pix[refOff0],
+			G: refRGBA.Pix[refOff0+1],
+			B: refRGBA.Pix[refOff0+2],
+			A: refRGBA.Pix[refOff0+3],
+		}
+	} else {
+		refFirst = color.RGBAModel.Convert(reference.At(rb.Min.X, rb.Min.Y)).(color.RGBA)
+	}
+
 	for {
 		img, err := sc.Grab(ctx, searchArea)
 		if err != nil {
@@ -399,7 +422,6 @@ func WaitWithTolerance(ctx context.Context, sc Screenshotter, expectedRect image
 		}
 
 		sb := img.Bounds()
-		w, h := expectedRect.Dx(), expectedRect.Dy()
 
 		sub, ok := img.(interface {
 			SubImage(r image.Rectangle) image.Image
@@ -407,13 +429,47 @@ func WaitWithTolerance(ctx context.Context, sc Screenshotter, expectedRect image
 		if !ok {
 			return 0, image.Rectangle{}, fmt.Errorf("find: grabbed image does not support SubImage")
 		}
-		for y := sb.Min.Y; y <= sb.Max.Y-h; y++ {
-			for x := sb.Min.X; x <= sb.Max.X-w; x++ {
-				r := image.Rect(x, y, x+w, y+h)
-				subImg := sub.SubImage(r)
-				hVal := PixelHash(subImg, newHash)
-				if hVal == targetHash {
-					return targetHash, r, nil
+
+		srcRGBA, srcOk := img.(*image.RGBA)
+
+		if srcOk && refOk {
+			// Fast path: both images are *image.RGBA. Compare first pixel bytes
+			// directly to reject most positions before hashing.
+			refOff0 := (rb.Min.Y-refRGBA.Rect.Min.Y)*refRGBA.Stride + (rb.Min.X-refRGBA.Rect.Min.X)*4
+			refBytes := refRGBA.Pix[refOff0 : refOff0+4]
+			for y := sb.Min.Y; y <= sb.Max.Y-h; y++ {
+				for x := sb.Min.X; x <= sb.Max.X-w; x++ {
+					off := (y-srcRGBA.Rect.Min.Y)*srcRGBA.Stride + (x-srcRGBA.Rect.Min.X)*4
+					p := srcRGBA.Pix[off : off+4]
+					if p[0] != refBytes[0] || p[1] != refBytes[1] || p[2] != refBytes[2] || p[3] != refBytes[3] {
+						continue
+					}
+					r := image.Rect(x, y, x+w, y+h)
+					if PixelHash(sub.SubImage(r), newHash) == refHash {
+						return refHash, r, nil
+					}
+				}
+			}
+		} else {
+			// Generic path: compare the top-left pixel via At()/color conversion
+			// before invoking the expensive full-rectangle hash.
+			for y := sb.Min.Y; y <= sb.Max.Y-h; y++ {
+				for x := sb.Min.X; x <= sb.Max.X-w; x++ {
+					var c color.RGBA
+					if srcOk {
+						off := (y-srcRGBA.Rect.Min.Y)*srcRGBA.Stride + (x-srcRGBA.Rect.Min.X)*4
+						p := srcRGBA.Pix[off : off+4]
+						c = color.RGBA{R: p[0], G: p[1], B: p[2], A: p[3]}
+					} else {
+						c = color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+					}
+					if c != refFirst {
+						continue
+					}
+					r := image.Rect(x, y, x+w, y+h)
+					if PixelHash(sub.SubImage(r), newHash) == refHash {
+						return refHash, r, nil
+					}
 				}
 			}
 		}
