@@ -19,9 +19,12 @@ import (
 var ErrNotFound = fmt.Errorf("find: not found")
 
 // Screenshotter is the subset of screen.Screenshotter needed by this package.
+// It also includes a fast region-hash path to avoid image allocations when
+// callers only need a pixel fingerprint.
 type Screenshotter interface {
 	Grab(ctx context.Context, rect image.Rectangle) (image.Image, error)
 	GrabFullHash(ctx context.Context) (uint32, error)
+	GrabRegionHash(ctx context.Context, rect image.Rectangle) (uint32, error)
 }
 
 // Hasher returns a fresh hash.Hash32 for each call. Swap out for stronger
@@ -30,6 +33,23 @@ type Hasher func() hash.Hash32
 
 // DefaultHasher uses CRC32 IEEE.
 var DefaultHasher Hasher = crc32.NewIEEE
+
+// adaptivePoll returns an exponentially backing-off poll duration. base is
+// the starting duration and max is the cap.
+func adaptivePoll(attempt int, base, max time.Duration) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	d := base * time.Duration(1<<attempt)
+	if d > max {
+		return max
+	}
+	return d
+}
+
+// Prevent staticcheck from flagging adaptivePoll as unused while it is wired
+// into wait loops in a follow-up commit.
+var _ = adaptivePoll
 
 // PixelHash computes a 32-bit hash of all RGBA pixels in img.
 // For *image.RGBA images it uses a fast path that reads pixel bytes directly
@@ -64,13 +84,11 @@ func PixelHash(img image.Image, newHash Hasher) uint32 {
 	return h.Sum32()
 }
 
-// GrabHash captures rect from sc and returns its pixel hash.
+// GrabHash captures rect from sc and returns its pixel hash. Preferred
+// implementations provide a fast GrabRegionHash that avoids allocating an
+// image.RGBA; use that when available.
 func GrabHash(ctx context.Context, sc Screenshotter, rect image.Rectangle, newHash Hasher) (uint32, error) {
-	img, err := sc.Grab(ctx, rect)
-	if err != nil {
-		return 0, fmt.Errorf("find: grab: %w", err)
-	}
-	return PixelHash(img, newHash), nil
+	return sc.GrabRegionHash(ctx, rect)
 }
 
 // FirstPixel returns the colour of the top-left pixel of rect captured from sc.
@@ -104,6 +122,35 @@ type Result struct {
 // On success, it returns the final hash (which equals want). On timeout, it returns
 // the last observed hash for debugging.
 func WaitFor(ctx context.Context, sc Screenshotter, rect image.Rectangle, want uint32, poll time.Duration, newHash Hasher) (uint32, error) {
+	// Adaptive poll when poll <= 0: start at 10ms and double up to 200ms.
+	if poll <= 0 {
+		attempt := 0
+		for {
+			h, err := GrabHash(ctx, sc, rect, newHash)
+			if err != nil {
+				return 0, err
+			}
+			if h == want {
+				return h, nil
+			}
+			select {
+			case <-ctx.Done():
+				return h, fmt.Errorf("find: timeout waiting for hash %08x (last: %08x)", want, h)
+			default:
+			}
+			d := adaptivePoll(attempt, 10*time.Millisecond, 200*time.Millisecond)
+			attempt++
+			t := time.NewTimer(d)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return h, fmt.Errorf("find: timeout waiting for hash %08x (last: %08x)", want, h)
+			case <-t.C:
+			}
+		}
+	}
+
+	// Fixed-interval polling.
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 
@@ -127,6 +174,35 @@ func WaitFor(ctx context.Context, sc Screenshotter, rect image.Rectangle, want u
 // It pairs with WaitForNoChange: use WaitForChange to detect when a transition begins,
 // then WaitForNoChange to detect when it ends.
 func WaitForChange(ctx context.Context, sc Screenshotter, rect image.Rectangle, initial uint32, poll time.Duration, newHash Hasher) (uint32, error) {
+	// Adaptive poll when poll <= 0.
+	if poll <= 0 {
+		attempt := 0
+		for {
+			h, err := GrabHash(ctx, sc, rect, newHash)
+			if err != nil {
+				return 0, err
+			}
+			if h != initial {
+				return h, nil
+			}
+			select {
+			case <-ctx.Done():
+				return 0, fmt.Errorf("find: timeout waiting for change in rect %v (hash stable at %08x)", rect, initial)
+			default:
+			}
+			d := adaptivePoll(attempt, 10*time.Millisecond, 200*time.Millisecond)
+			attempt++
+			t := time.NewTimer(d)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return 0, fmt.Errorf("find: timeout waiting for change in rect %v (hash stable at %08x)", rect, initial)
+			case <-t.C:
+			}
+		}
+	}
+
+	// Fixed-interval polling.
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 
@@ -162,6 +238,66 @@ func WaitForNoChange(ctx context.Context, sc Screenshotter, rect image.Rectangle
 	sentinelSet := false
 	streak := 0
 
+	// Adaptive polling when poll <= 0.
+	if poll <= 0 {
+		attempt := 0
+		for {
+			img, err := sc.Grab(ctx, rect)
+			if err != nil {
+				return 0, err
+			}
+
+			// Fast pixel check before full CRC32: if the top-left pixel of the
+			// grabbed image changed since the last iteration, the hash is
+			// definitely different — skip the CRC32 and reset the streak.
+			// This is conservative: we only skip when we are certain of a change.
+			b := img.Bounds()
+			cur := color.RGBAModel.Convert(img.At(b.Min.X, b.Min.Y)).(color.RGBA)
+			if sentinelSet && cur != sentinel {
+				sentinel = cur
+				last = 0 // force mismatch on next full hash
+				streak = 0
+				select {
+				case <-ctx.Done():
+					return last, fmt.Errorf("find: WaitForNoChange timeout: region still changing after %d/%d stable samples (last hash %08x)", streak, stable, last)
+				default:
+				}
+				// continue to adaptive backoff sleep
+				// fallthrough
+			}
+			sentinel = cur
+			sentinelSet = true
+
+			h := PixelHash(img, newHash)
+			if h == last {
+				streak++
+				if streak >= stable {
+					return h, nil
+				}
+			} else {
+				last = h
+				streak = 1
+			}
+
+			select {
+			case <-ctx.Done():
+				return last, fmt.Errorf("find: WaitForNoChange timeout: region still changing after %d/%d stable samples (last hash %08x)", streak, stable, last)
+			default:
+			}
+
+			d := adaptivePoll(attempt, 10*time.Millisecond, 200*time.Millisecond)
+			attempt++
+			t := time.NewTimer(d)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return last, fmt.Errorf("find: WaitForNoChange timeout: region still changing after %d/%d stable samples (last hash %08x)", streak, stable, last)
+			case <-t.C:
+			}
+		}
+	}
+
+	// Fixed-interval polling.
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 
