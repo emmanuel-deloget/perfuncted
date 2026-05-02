@@ -113,6 +113,9 @@ func NewX11Backend(displayName string) (*X11Backend, error) {
 // On composited displays it snapshots the root via NameWindowPixmap so that
 // the actual composited framebuffer is captured rather than the bare root pixmap.
 func (b *X11Backend) Grab(ctx context.Context, rect image.Rectangle) (image.Image, error) {
+	if rect.Empty() {
+		rect = image.Rect(0, 0, int(b.screen.WidthInPixels), int(b.screen.HeightInPixels))
+	}
 	drawable := xproto.Drawable(b.root)
 
 	if b.hasComposite {
