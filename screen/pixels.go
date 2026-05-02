@@ -11,6 +11,9 @@ import (
 // This function is used by multiple backends (wlrscreencopy, extcapture, x11)
 // that all receive BGRA frames from the compositor or X server.
 func decodeBGRA(data []byte, w, h, stride int) *image.RGBA {
+	if len(data) == 0 || w <= 0 || h <= 0 {
+		return image.NewRGBA(image.Rect(0, 0, 0, 0))
+	}
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	rowBytes := w * 4
 	for row := 0; row < h; row++ {
